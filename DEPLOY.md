@@ -15,7 +15,10 @@ apartado.
 ## Antes de empezar
 
 En el servidor: Ubuntu 24.04, Caddy ya instalado y sirviendo otros dominios,
-`ufw` activo con solo 22/80/443 abiertos. Se entra como `root` con clave.
+`ufw` activo. Se entra como `root` con clave — es el único usuario con shell, así
+que **no pongas `PermitRootLogin no`**: te quedarías fuera y solo se recupera por
+la consola del proveedor. El puerto de la app no se abre en `ufw` nunca: se llega
+a él por el proxy, desde dentro de la máquina.
 
 En local: Windows con OpenSSH. El código se sube por `scp`; **en el servidor no
 hay git y ningún proyecto tiene `.git`**, así que no intentes `git pull` allí.
@@ -26,24 +29,27 @@ Elige antes:
   por Cloudflare en modo Flexible, el bloque de Caddy necesita el prefijo
   `http://`; si el A es directo, no.
 - **Un puerto libre** de loopback. Comprueba con `ss -tlnH` cuáles están cogidos.
+  Los scripts de `scripts/` asumen **8003**; si eliges otro, cámbialo en los tres.
 
 En el resto del documento: `PUERTO` es el que hayas elegido y `TU_DOMINIO` el
 subdominio.
 
 ## 1. Subir el código
 
-Desde local, excluyendo lo que no debe viajar:
+La primera vez, a mano — `scripts/deploy.ps1` sirve para actualizar, pero da por
+hecho que el venv ya existe:
 
 ```powershell
 $VPS  = "root@TU_IP"
 $KEY  = "$env:USERPROFILE\.ssh\id_ed25519"
 $ARGS = @("-i", $KEY)
 
-ssh @ARGS $VPS "mkdir -p /root/garmin-ia/{app,logs,data}"
+ssh @ARGS $VPS "mkdir -p /root/garmin-ia/{app,logs,data,scripts}"
 
 robocopy .\app "$env:TEMP\gb-app" /E /XD __pycache__ /XF "*.pyc" | Out-Null
 scp @ARGS -r -q "$env:TEMP\gb-app\*" "${VPS}:/root/garmin-ia/app/"
 scp @ARGS -q .\requirements.txt "${VPS}:/root/garmin-ia/"
+scp @ARGS -q .\scripts\garmin-api.service .\scripts\setup-caddy.sh "${VPS}:/root/garmin-ia/scripts/"
 Remove-Item "$env:TEMP\gb-app" -Recurse -Force
 ```
 
@@ -112,25 +118,11 @@ por una posterior.
 
 ## 5. Servicio systemd
 
-`/etc/systemd/system/garmin-api.service`:
+La unit está en `scripts/garmin-api.service`:
 
-```ini
-[Unit]
-Description=Garmin Bridge (FastAPI + MCP)
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/root/garmin-ia
-ExecStart=/root/garmin-ia/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port PUERTO --workers 1 --proxy-headers --forwarded-allow-ips="127.0.0.1"
-Restart=always
-RestartSec=3
-StandardOutput=append:/root/garmin-ia/logs/api.log
-StandardError=append:/root/garmin-ia/logs/api.err
-
-[Install]
-WantedBy=multi-user.target
+```bash
+cd /root/garmin-ia
+cp scripts/garmin-api.service /etc/systemd/system/
 ```
 
 **`--workers 1` no es negociable, aunque otros servicios del VPS usen 2.** Dos
@@ -157,46 +149,25 @@ systemctl status garmin-api
 
 ⚠️ **`/etc/caddy/Caddyfile` es único y lo comparten todos los sitios del
 servidor. Nunca lo sobrescribas** — copiar encima el `Caddyfile` de este repo
-tumbaría el resto de dominios. Se añade un bloque delimitado por marcadores:
+tumbaría el resto de dominios.
+
+`scripts/setup-caddy.sh` hace lo correcto: copia de seguridad, borra solo su
+propio bloque entre marcadores `# >>> GARMIN BEGIN/END <<<`, lo vuelve a añadir,
+**valida** y recarga.
 
 ```bash
-cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +%s)
-
-# Borra el bloque propio anterior, si lo hubiera
-sed -i '/# >>> GARMIN BEGIN <<</,/# >>> GARMIN END <<</d' /etc/caddy/Caddyfile
-
-cat >> /etc/caddy/Caddyfile <<'EOF'
-
-# >>> GARMIN BEGIN <<<
-TU_DOMINIO {
-    encode gzip
-
-    # El bearer viaja en cada peticion: sin HSTS un downgrade a HTTP lo expone.
-    header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains"
-        X-Content-Type-Options "nosniff"
-        Referrer-Policy "no-referrer"
-        -Server
-    }
-
-    reverse_proxy 127.0.0.1:PUERTO {
-        # El endpoint MCP usa streaming HTTP: sin esto Caddy trocea la respuesta.
-        flush_interval -1
-    }
-}
-# >>> GARMIN END <<<
-EOF
-
-caddy validate --config /etc/caddy/Caddyfile   # si falla, PARA y arregla
-systemctl reload caddy
+bash /root/garmin-ia/scripts/setup-caddy.sh TU_DOMINIO PUERTO
 ```
 
-El `Caddyfile` de la raíz del repo es la plantilla de ese bloque, para copiar y
-pegar. No es un fichero para instalar tal cual.
+Si `caddy validate` falla, el script para ahí y no recarga: arregla antes de
+insistir. Es idempotente, se puede repetir para cambiar dominio o puerto.
+
+El `Caddyfile` de la raíz del repo es la plantilla de ese bloque, como
+referencia. No es un fichero para instalar tal cual.
 
 Caddy pide y renueva el certificado solo, siempre que el dominio ya apunte al
-VPS. Si va detrás de Cloudflare en modo Flexible, escribe `http://TU_DOMINIO` y
-el certificado lo pone Cloudflare.
+VPS. Si va detrás de Cloudflare en modo Flexible, pasa el dominio **con el
+prefijo** `http://TU_DOMINIO` o Caddy intentará sacar un certificado que sobra.
 
 ## 7. Comprobar que está bien cerrado
 
@@ -240,15 +211,14 @@ claude mcp add --transport http garmin https://TU_DOMINIO/mcp/ \
 
 ## Actualizar
 
-Repite el paso 1 (solo `app/`) y reinicia. `data/` y `.env` no se tocan:
-
-```bash
-systemctl restart garmin-api
-journalctl -u garmin-api -n 30 --no-pager
+```powershell
+$env:GARMIN_VPS = "root@TU_IP"
+.\scripts\deploy.ps1
 ```
 
-Si cambió `requirements.txt`, `venv/bin/pip install -r requirements.txt` antes de
-reiniciar.
+Sube `app/` y `requirements.txt`, instala dependencias, reinicia el servicio y
+comprueba el `/health`. **No toca `.env` ni `data/`.** El host no está escrito en
+el script a propósito: sale de `$env:GARMIN_VPS` o del parámetro `-Vps`.
 
 ## Operaciones
 

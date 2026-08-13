@@ -8,8 +8,10 @@ from __future__ import annotations
 import datetime as dt
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from . import store, sync, workouts
+from .config import settings
 from .garmin_client import client
 
 INSTRUCCIONES = """\
@@ -34,10 +36,34 @@ Los datos vienen de la nube de Garmin, no del dispositivo, y se cachean: usa
 refresh solo si necesitas el dato del momento.\
 """
 
+def _seguridad_transporte() -> TransportSecuritySettings | None:
+    """Permite los dominios publicos sin desactivar la proteccion.
+
+    FastMCP, al ver que se escucha en 127.0.0.1, solo admite Host localhost y
+    devuelve 421 a todo lo demas. Detras de un proxy el Host que llega es el
+    dominio real, asi que hay que anadirlo explicitamente en vez de apagar la
+    comprobacion, que sigue defendiendo de ataques de DNS rebinding.
+    """
+    dominios = [h.strip() for h in settings.allowed_hosts.split(",") if h.strip()]
+    if not dominios:
+        return None  # sin dominios declarados, el comportamiento local de siempre
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=dominios + ["127.0.0.1:*", "localhost:*", "[::1]:*"],
+        allowed_origins=[f"https://{d}" for d in dominios]
+        + [f"http://{d}" for d in dominios]
+        + ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+    )
+
+
 # streamable_http_path="/" porque main.py ya monta esta app bajo /mcp:
 # con el valor por defecto ("/mcp") el endpoint acabaria en /mcp/mcp.
 mcp = FastMCP(
-    "garmin", stateless_http=True, streamable_http_path="/", instructions=INSTRUCCIONES
+    "garmin",
+    stateless_http=True,
+    streamable_http_path="/",
+    instructions=INSTRUCCIONES,
+    transport_security=_seguridad_transporte(),
 )
 
 

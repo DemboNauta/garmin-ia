@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     # Token bearer para proteger la API y el endpoint MCP.
     api_token: str = "cambiame"
 
+    # Dominios publicos por los que se sirve el MCP, separados por comas.
+    # El SDK trae proteccion anti DNS rebinding: como uvicorn escucha en
+    # 127.0.0.1, FastMCP asume entorno local y responde 421 a cualquier Host
+    # que no sea localhost. Detras de un proxy hay que declarar el de verdad.
+    allowed_hosts: str = ""
+
     # Zona horaria para resolver "hoy"
     timezone: str = "Europe/Madrid"
 
