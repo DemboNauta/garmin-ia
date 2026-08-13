@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from . import store, sync
+from . import garmin_client, identity, store, sync
 from .config import settings
 from .mcp_server import mcp
 
@@ -37,9 +37,17 @@ def _token_valido(authorization: str) -> bool:
     return secrets.compare_digest(authorization, f"Bearer {settings.api_token}")
 
 
-def auth(authorization: str = Header(default="")) -> None:
+def usuario_autenticado(authorization: str = Header(default="")) -> str:
+    """Valida el bearer y devuelve de quien son los datos que se piden.
+
+    Se inyecta como parametro en vez de viajar por variable de contexto: FastAPI
+    ejecuta dependencia y endpoint en hilos distintos del pool, asi que un
+    ContextVar fijado aqui no llegaria alli. Las herramientas MCP si usan el
+    contexto, porque ahi no hay inyeccion de dependencias donde colgarlo.
+    """
     if not _token_valido(authorization):
         raise HTTPException(status_code=401, detail="Token invalido")
+    return identity.dueño()
 
 
 class BearerAuthMiddleware:
@@ -62,7 +70,13 @@ class BearerAuthMiddleware:
             respuesta = JSONResponse({"detail": "Token invalido"}, status_code=401)
             await respuesta(scope, receive, send)
             return
-        await self.app(scope, receive, send)
+        # El bearer identifica al dueño. Cuando entre OAuth, aqui se resolvera
+        # el token al usuario que corresponda y las herramientas no cambian.
+        testigo = identity.fijar_usuario(identity.dueño())
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            identity.restaurar(testigo)
 
 
 @asynccontextmanager
@@ -70,10 +84,11 @@ async def lifespan(app: FastAPI):
     _check_token_config()
     store.init()
     # Repara una cache envenenada por arranques anteriores sin sesion valida.
-    sync.limpiar_cache_vacia()
+    garmin_client.migrar_tokens_de_disco()
+    sync.limpiar_cache_vacia(identity.dueño())
     if settings.sync_enabled:
         scheduler.add_job(
-            lambda: log.info("Sync automatico: %s", sync.sync_range(settings.sync_backfill_days)),
+            lambda: log.info("Sync automatico: %s", sync.sync_range(identity.dueño(), settings.sync_backfill_days)),
             "interval",
             minutes=settings.sync_interval_minutes,
             next_run_time=dt.datetime.now() + dt.timedelta(seconds=20),
@@ -97,18 +112,21 @@ def health() -> dict:
     return {"status": "ok", "date": sync.today().isoformat()}
 
 
-@app.get("/metrics", dependencies=[Depends(auth)])
-def metrics(days: int = 7) -> list[dict]:
+@app.get("/metrics")
+def metrics(days: int = 7, usuario: str = Depends(usuario_autenticado)) -> list[dict]:
     end = sync.today()
-    return [sync.flatten_daily(r) for r in store.get_daily_range(end - dt.timedelta(days=days - 1), end)]
+    return [
+        sync.flatten_daily(r)
+        for r in store.get_daily_range(usuario, end - dt.timedelta(days=days - 1), end)
+    ]
 
 
-@app.get("/activities", dependencies=[Depends(auth)])
-def activities(days: int = 30) -> list[dict]:
+@app.get("/activities")
+def activities(days: int = 30, usuario: str = Depends(usuario_autenticado)) -> list[dict]:
     end = sync.today()
-    return store.get_activities(end - dt.timedelta(days=days - 1), end)
+    return store.get_activities(usuario, end - dt.timedelta(days=days - 1), end)
 
 
-@app.post("/sync", dependencies=[Depends(auth)])
-def force_sync(days: int = 7) -> dict:
-    return sync.sync_range(days)
+@app.post("/sync")
+def force_sync(days: int = 7, usuario: str = Depends(usuario_autenticado)) -> dict:
+    return sync.sync_range(usuario, days)

@@ -12,7 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .config import settings
-from .garmin_client import client
+from .garmin_client import para_usuario
 from . import store
 
 log = logging.getLogger(__name__)
@@ -94,45 +94,45 @@ def tiene_datos(raw: dict) -> bool:
     return any(v is not None for k, v in raw.items() if k != "date")
 
 
-def sync_day(day: dt.date) -> dict:
-    raw = client.daily_snapshot(day)
+def sync_day(user_id: str, day: dt.date) -> dict:
+    raw = para_usuario(user_id).daily_snapshot(day)
     if not tiene_datos(raw):
         raise SincronizacionVacia(
             f"Garmin no devolvio ningun dato para {day.isoformat()}; no se cachea."
         )
-    store.save_daily(day, raw)
+    store.save_daily(user_id, day, raw)
     return flatten_daily(raw)
 
 
-def limpiar_cache_vacia() -> int:
+def limpiar_cache_vacia(user_id: str) -> int:
     """Borra los dias cacheados sin un solo dato y devuelve cuantos eran.
 
     Repara bases que se llenaron antes de que existieran los tokens, que es lo
     que pasa si el servicio arranca antes del primer login.
     """
-    vacios = [d for d, raw in store.all_daily() if not tiene_datos(raw)]
+    vacios = [d for d, raw in store.all_daily(user_id) if not tiene_datos(raw)]
     for day in vacios:
-        store.delete_daily(day)
+        store.delete_daily(user_id, day)
     if vacios:
         log.warning("Purgados %d dias vacios de la cache: %s", len(vacios), ", ".join(vacios))
     return len(vacios)
 
 
-def sync_range(days: int = 7) -> dict:
+def sync_range(user_id: str, days: int = 7) -> dict:
     end = today()
     start = end - dt.timedelta(days=days - 1)
     ok, failed = 0, []
     for i in range(days):
         d = start + dt.timedelta(days=i)
         try:
-            sync_day(d)
+            sync_day(user_id, d)
             ok += 1
         except Exception as exc:
             failed.append({"date": d.isoformat(), "error": str(exc)})
             log.warning("Fallo sincronizando %s: %s", d, exc)
     try:
-        for act in client.activities(start, end):
-            store.save_activity(act)
+        for act in para_usuario(user_id).activities(start, end):
+            store.save_activity(user_id, act)
     except Exception as exc:
         failed.append({"activities": str(exc)})
     return {"synced_days": ok, "from": start.isoformat(), "to": end.isoformat(), "errors": failed}

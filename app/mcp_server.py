@@ -12,7 +12,8 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from . import store, sync, workouts
 from .config import settings
-from .garmin_client import client
+from .garmin_client import para_usuario
+from .identity import usuario_actual
 
 INSTRUCCIONES = """\
 Datos de Garmin Connect de un unico usuario, y escritura de entrenamientos.
@@ -67,6 +68,11 @@ mcp = FastMCP(
 )
 
 
+def _cliente():
+    """Cliente de Garmin del usuario de esta peticion."""
+    return para_usuario(usuario_actual())
+
+
 @mcp.tool()
 def get_devices() -> list[dict]:
     """Dispositivos Garmin vinculados a la cuenta y su ultima sincronizacion."""
@@ -77,7 +83,7 @@ def get_devices() -> list[dict]:
             "unit_id": d.get("unitId"),
             "last_sync": d.get("lastSyncTime"),
         }
-        for d in client.devices()
+        for d in _cliente().devices()
     ]
 
 
@@ -89,18 +95,18 @@ def get_metrics(days: int = 7, refresh: bool = False) -> list[dict]:
     end = sync.today()
     start = end - dt.timedelta(days=days - 1)
     if refresh:
-        sync.sync_range(days)
-    rows = store.get_daily_range(start, end)
+        sync.sync_range(usuario_actual(), days)
+    rows = store.get_daily_range(usuario_actual(), start, end)
     if not rows:
-        sync.sync_range(days)
-        rows = store.get_daily_range(start, end)
+        sync.sync_range(usuario_actual(), days)
+        rows = store.get_daily_range(usuario_actual(), start, end)
     return [sync.flatten_daily(r) for r in rows]
 
 
 @mcp.tool()
 def get_today() -> dict:
     """Estado de hoy: la foto que hay que mirar antes de proponer sesion."""
-    return sync.sync_day(sync.today())
+    return sync.sync_day(usuario_actual(), sync.today())
 
 
 @mcp.tool()
@@ -108,11 +114,11 @@ def get_activities(days: int = 30) -> list[dict]:
     """Entrenamientos registrados en los ultimos N dias (resumen por sesion)."""
     end = sync.today()
     start = end - dt.timedelta(days=days - 1)
-    acts = store.get_activities(start, end)
+    acts = store.get_activities(usuario_actual(), start, end)
     if not acts:
-        acts = client.activities(start, end)
+        acts = _cliente().activities(start, end)
         for a in acts:
-            store.save_activity(a)
+            store.save_activity(usuario_actual(), a)
     return [
         {
             "id": a.get("activityId"),
@@ -174,11 +180,11 @@ def create_workout(
     """
     datos = spec.model_dump(exclude_none=True)
     payload = workouts.from_spec(datos)
-    created = client.create_workout(payload)
+    created = _cliente().create_workout(payload)
     result = {"workout_id": created.get("workoutId"), "name": created.get("workoutName")}
     if schedule_date:
         day = dt.date.fromisoformat(schedule_date)
-        client.schedule_workout(created["workoutId"], day)
+        _cliente().schedule_workout(created["workoutId"], day)
         result["scheduled_for"] = schedule_date
     avisos = workouts.pasos_sin_ejercicio(datos)
     if avisos:
@@ -196,7 +202,7 @@ def list_workouts(limit: int = 20) -> list[dict]:
         {"id": w.get("workoutId"), "name": w.get("workoutName"),
          "sport": (w.get("sportType") or {}).get("sportTypeKey"),
          "updated": w.get("updateDate")}
-        for w in client.list_workouts(limit)
+        for w in _cliente().list_workouts(limit)
     ]
 
 
@@ -259,7 +265,7 @@ def get_workout(workout_id: int, raw: bool = False) -> dict:
 
     Con raw=True devuelve el DTO crudo de Garmin, mucho mas verboso.
     """
-    w = client.workout_detail(workout_id)
+    w = _cliente().workout_detail(workout_id)
     if raw:
         return w
     brutos = [s for seg in w.get("workoutSegments") or [] for s in seg.get("workoutSteps") or []]
@@ -288,7 +294,7 @@ def update_workout(workout_id: int, spec: workouts.EntrenoSpec) -> dict:
     """
     datos = spec.model_dump(exclude_none=True)
     payload = workouts.from_spec(datos)
-    updated = client.update_workout(workout_id, payload)
+    updated = _cliente().update_workout(workout_id, payload)
     result = {"workout_id": workout_id, "updated": True, "name": (updated or {}).get("workoutName")}
     avisos = workouts.pasos_sin_ejercicio(datos)
     if avisos:
@@ -302,7 +308,7 @@ def update_workout(workout_id: int, spec: workouts.EntrenoSpec) -> dict:
 @mcp.tool()
 def delete_workout(workout_id: int) -> dict:
     """Borra un entrenamiento y, con el, cualquier programacion que lo apunte."""
-    client.delete_workout(workout_id)
+    _cliente().delete_workout(workout_id)
     return {"workout_id": workout_id, "deleted": True}
 
 
@@ -313,7 +319,7 @@ def list_scheduled(year: int, month: int) -> list[dict]:
     Devuelve `schedule_id`, que es lo unico que acepta unschedule_workout y que
     NO coincide con el id del entrenamiento.
     """
-    datos = client.scheduled_workouts(year, month) or {}
+    datos = _cliente().scheduled_workouts(year, month) or {}
     items = datos.get("calendarItems") if isinstance(datos, dict) else datos
     salida = []
     for it in items or []:
@@ -331,7 +337,7 @@ def list_scheduled(year: int, month: int) -> list[dict]:
 @mcp.tool()
 def schedule_workout(workout_id: int, schedule_date: str) -> dict:
     """Programa un entrenamiento ya existente en una fecha (YYYY-MM-DD)."""
-    client.schedule_workout(workout_id, dt.date.fromisoformat(schedule_date))
+    _cliente().schedule_workout(workout_id, dt.date.fromisoformat(schedule_date))
     return {"workout_id": workout_id, "scheduled_for": schedule_date}
 
 
@@ -342,5 +348,5 @@ def unschedule_workout(schedule_id: int) -> dict:
     Necesita el `schedule_id` que devuelve list_scheduled, no el id del
     entrenamiento. Para mover una sesion de dia: unschedule + schedule_workout.
     """
-    client.unschedule_workout(schedule_id)
+    _cliente().unschedule_workout(schedule_id)
     return {"schedule_id": schedule_id, "unscheduled": True}

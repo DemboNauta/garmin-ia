@@ -12,6 +12,7 @@ from typing import Any
 
 from garminconnect import Garmin
 
+from . import crypto, store
 from .config import settings
 
 log = logging.getLogger(__name__)
@@ -23,9 +24,16 @@ class GarminAuthError(RuntimeError):
 
 
 class GarminClient:
-    """Cliente perezoso y thread-safe. Reutiliza los tokens en disco."""
+    """Cliente perezoso y thread-safe, atado a un usuario concreto.
 
-    def __init__(self) -> None:
+    Los tokens no viven en disco sino cifrados en la base (`app/crypto.py`), y
+    se le pasan a la libreria como JSON en linea. Asi no hay un directorio por
+    usuario que proteger ni tokens de terceros en claro sobre el sistema de
+    ficheros.
+    """
+
+    def __init__(self, user_id: str) -> None:
+        self.user_id = user_id
         self._api: Garmin | None = None
 
     # ------------------------------------------------------------------ auth
@@ -33,30 +41,32 @@ class GarminClient:
         with _lock:
             if self._api is not None:
                 return self._api
+            cifrado = store.leer_tokens_garmin(self.user_id)
+            if not cifrado:
+                raise GarminAuthError(
+                    f"El usuario '{self.user_id}' no tiene Garmin vinculado todavia."
+                )
             api = Garmin()
             try:
-                # Reanuda la sesion desde los tokens OAuth guardados en disco.
-                api.login(settings.tokenstore)
-                log.info("Sesion de Garmin reanudada desde %s", settings.tokenstore)
-            except Exception as exc:  # token ausente, caducado o corrupto
-                log.warning("No se pudo reanudar la sesion (%s); login completo", exc)
-                if not settings.garmin_email or not settings.garmin_password:
-                    raise GarminAuthError(
-                        "No hay tokens validos ni credenciales. Ejecuta `python -m app.login`."
-                    ) from exc
-                # Sin prompt_mfa: si la cuenta pide MFA aqui no hay nadie para
-                # teclear el codigo, asi que falla y se resuelve con app/login.py.
-                api = Garmin(settings.garmin_email, settings.garmin_password)
-                try:
-                    # login(tokenstore) persiste los tokens al terminar.
-                    api.login(settings.tokenstore)
-                except Exception as exc2:
-                    raise GarminAuthError(
-                        "Login automatico fallido (MFA o rate limit de Garmin). "
-                        "Ejecuta `python -m app.login` una vez de forma interactiva."
-                    ) from exc2
+                # La libreria acepta el tokenstore como JSON en linea, no solo
+                # como ruta: eso permite tenerlos cifrados en la base.
+                api.login(crypto.descifrar(cifrado))
+                log.info("Sesion de Garmin reanudada para %s", self.user_id)
+            except crypto.ErrorDeCifrado:
+                raise
+            except Exception as exc:
+                raise GarminAuthError(
+                    f"La sesion de Garmin de '{self.user_id}' ya no vale "
+                    "(token caducado o revocado). Hay que volver a vincular."
+                ) from exc
             self._api = api
             return api
+
+    def guardar_sesion(self, api: Garmin) -> None:
+        """Persiste cifrada la sesion de una vinculacion recien hecha."""
+        store.guardar_tokens_garmin(self.user_id, crypto.cifrar(api.client.dumps()))
+        with _lock:
+            self._api = api
 
     def reset(self) -> None:
         with _lock:
@@ -158,4 +168,40 @@ class GarminClient:
         return self._call("unschedule_workout", schedule_id)
 
 
-client = GarminClient()
+_clientes: dict[str, GarminClient] = {}
+
+
+def para_usuario(user_id: str) -> GarminClient:
+    """Cliente de un usuario, reutilizando su sesion entre peticiones."""
+    with _lock:
+        if user_id not in _clientes:
+            _clientes[user_id] = GarminClient(user_id)
+        return _clientes[user_id]
+
+
+def olvidar(user_id: str) -> None:
+    """Descarta la sesion cacheada, p.ej. al desvincular o borrar la cuenta."""
+    with _lock:
+        _clientes.pop(user_id, None)
+
+
+def migrar_tokens_de_disco() -> bool:
+    """Mete en la base, cifrados, los tokens sueltos de la epoca mono-usuario.
+
+    Antes vivian en texto plano en GB_TOKENSTORE. Se copian al dueño y el
+    fichero se renombra, para no dejar una copia legible por ahi.
+    """
+    from garminconnect.client import token_file_path
+
+    dueño = settings.owner_user_id
+    if store.leer_tokens_garmin(dueño):
+        return False
+    fichero = token_file_path(settings.tokenstore)
+    if not fichero.exists():
+        return False
+
+    store.crear_usuario(dueño)
+    store.guardar_tokens_garmin(dueño, crypto.cifrar(fichero.read_text(encoding="utf-8")))
+    fichero.rename(fichero.with_suffix(".json.migrado"))
+    log.warning("Tokens de %s migrados a la base cifrados; %s renombrado", dueño, fichero.name)
+    return True

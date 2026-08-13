@@ -18,6 +18,15 @@ class Settings(BaseSettings):
     # Token bearer para proteger la API y el endpoint MCP.
     api_token: str = "cambiame"
 
+    # Clave Fernet con la que se cifran los tokens de Garmin en la base de datos.
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Si se pierde, los usuarios tienen que volver a vincular su cuenta.
+    encryption_key: str = ""
+
+    # Identificador del dueño de la instalacion. Los datos que ya hubiera en la
+    # base cuando esta era mono-usuario se le atribuyen a el al migrar.
+    owner_user_id: str = "owner"
+
     # Dominios publicos por los que se sirve el MCP, separados por comas.
     # El SDK trae proteccion anti DNS rebinding: como uvicorn escucha en
     # 127.0.0.1, FastMCP asume entorno local y responde 421 a cualquier Host
