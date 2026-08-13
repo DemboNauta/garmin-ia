@@ -1,0 +1,24 @@
+# Proxy TLS delante de Garmin Bridge.
+# Caddy saca y renueva el certificado de Let's Encrypt solo; lo unico que hace
+# falta es que el dominio apunte al VPS y que los puertos 80 y 443 esten abiertos.
+#
+# Sustituye el dominio por el tuyo antes de arrancar.
+
+garmin.tu-dominio.com {
+	encode gzip
+
+	# El bearer viaja en cada peticion: sin HSTS un downgrade a HTTP lo expone.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# /health es publico a proposito (sondas de monitorizacion) y no revela datos.
+	# El resto ya exige bearer en la aplicacion.
+	reverse_proxy 127.0.0.1:8000 {
+		# El endpoint MCP usa streaming HTTP: sin esto Caddy trocea la respuesta.
+		flush_interval -1
+	}
+}

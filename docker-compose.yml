@@ -5,5 +5,20 @@ services:
     env_file: .env
     volumes:
       - ./data:/data
+    # Solo escucha en loopback: al exterior se sale por el proxy con TLS.
+    # Sin el 127.0.0.1 Docker abre el puerto en todas las interfaces y se salta
+    # el firewall del host escribiendo reglas propias en iptables.
     ports:
       - "127.0.0.1:8000:8000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

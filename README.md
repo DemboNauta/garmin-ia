@@ -33,8 +33,11 @@ docker compose up -d
 curl localhost:8000/health
 ```
 
-Detrás de un Caddy o Nginx con TLS: el endpoint MCP es `https://tu-dominio/mcp`,
-con cabecera `Authorization: Bearer <GB_API_TOKEN>`.
+Detrás de un Caddy o Nginx con TLS: el endpoint MCP es `https://tu-dominio/mcp/`,
+con cabecera `Authorization: Bearer <GB_API_TOKEN>`. La API REST y el endpoint MCP
+exigen ese bearer; solo `/health` es público.
+
+Para el despliegue completo en servidor, ver **[DEPLOY.md](DEPLOY.md)**.
 
 ## Herramientas MCP
 
