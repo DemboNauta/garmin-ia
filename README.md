@@ -53,7 +53,14 @@ muscular.
 | `get_today` | La foto de hoy: sueño, HRV, Body Battery, readiness |
 | `get_metrics(days)` | Serie diaria de las ~15 métricas accionables |
 | `get_activities(days)` | Sesiones con FC media, ritmo y training effect |
+| `get_activity(id)` | Una sesión al detalle, con sus series |
 | `get_devices` | Qué Garmin hay vinculados y su última sincronización |
+
+| Corregir lo ya hecho | |
+|---|---|
+| `update_activity_sets(id, sets)` | Reescribe las series: ejercicio, repeticiones y peso |
+| `update_activity(id, ...)` | Arregla el nombre, el deporte o la nota |
+| `add_activity(...)` | Da de alta a mano lo que el reloj no llegó a grabar |
 
 | Entrenamientos | |
 |---|---|
@@ -76,6 +83,15 @@ que es texto libre que después no se puede agregar ni analizar.
 {"kind": "interval", "exercise": "Barbell Bench Press", "reps": 8, "weight_kg": 40}
 // → category: BENCH_PRESS · exerciseName: BARBELL_BENCH_PRESS
 ```
+
+**Y lo que el reloj no supo, se lo cuentas después.** Una pulsera sin pantalla
+detecta que te mueves y cuenta repeticiones a ojo, pero no sabe si eso era press
+de banca o remo, ni con cuántos kilos: guarda la serie como `UNKNOWN` y sin
+carga. Al decírselo al asistente, la sesión pasa a contar en su grupo muscular y
+el peso queda registrado.
+
+> «En la sesión de ayer las dos primeras series eran press de banca con 40, y la
+> tercera no la contó.»
 
 ## Arquitectura
 

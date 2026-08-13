@@ -6,14 +6,17 @@ ejecutan ordenes; decidir que entrenamiento toca es trabajo del modelo.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import profile, store, sync, workouts
+from . import activities, profile, store, sync, workouts
 from .config import settings
 from .garmin_client import para_usuario
 from .identity import usuario_actual
+
+log = logging.getLogger(__name__)
 
 INSTRUCCIONES = """\
 Datos de Garmin Connect de quien te esta hablando, y escritura de entrenamientos
@@ -31,6 +34,14 @@ Para crear fuerza, el orden es: find_exercises para dar con el nombre exacto
 (el catalogo esta SOLO en ingles) y luego create_workout con ese nombre en
 `exercise`. Un ejercicio sin identificar pierde el grupo muscular y la sesion
 deja de ser analizable despues; describirlo en `note` no lo arregla.
+
+Lo que el reloj grabo tambien se corrige. Una pulsera sin pantalla no sabe que
+ejercicio era ni con cuanto peso, asi que las series de fuerza suelen quedar
+como UNKNOWN y sin carga: cuando lo cuente, mira la sesion con get_activity y
+arregla sus series con update_activity_sets, el nombre o el deporte con
+update_activity, y da de alta con add_activity lo que no llegara a grabarse.
+Sin eso, la sesion no cuenta en ningun grupo muscular y no hay progresion de
+peso que seguir.
 
 Para editar, get_workout devuelve los pasos con la misma forma que espera
 create_workout: cambia lo que haga falta y pasalos a update_workout. Eso
@@ -143,6 +154,187 @@ def get_activities(days: int = 30) -> list[dict]:
         }
         for a in acts
     ]
+
+
+def _dia_de(actividad: dict) -> str:
+    """Fecha local de una sesion, que es como se indexa la cache."""
+    return ((actividad.get("summaryDTO") or {}).get("startTimeLocal") or "")[:10]
+
+
+def _refrescar_cache(dia: str) -> None:
+    """Pone al dia la copia local tras tocar una sesion.
+
+    Si falla no se propaga: la correccion ya esta hecha en Garmin, y quedarse
+    con la cache vieja un rato es menos malo que devolver un error por algo que
+    se arregla solo en la siguiente sincronizacion.
+    """
+    try:
+        sync.refrescar_actividades(usuario_actual(), dt.date.fromisoformat(dia))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("No se pudo refrescar la cache del %s: %s", dia, exc)
+
+
+@mcp.tool()
+def get_activity(activity_id: int) -> dict:
+    """Una sesion ya registrada, con el detalle de sus series.
+
+    Miralo antes de corregir nada. En fuerza, `sets` viene con la misma forma
+    que acepta update_activity_sets, asi que basta con cambiar lo que este mal
+    y devolverlo entero.
+
+    En cada serie, `detected` es lo que el reloj creyo ver cuando no llega a
+    ejercicio del catalogo: UNKNOWN significa que no reconocio nada. Ahi es
+    donde suele faltar el ejercicio, el peso o las repeticiones, porque una
+    pulsera no puede saberlos.
+    """
+    a = _cliente().activity(activity_id)
+    s = a.get("summaryDTO") or {}
+    fuera = {
+        "id": a.get("activityId"),
+        "name": a.get("activityName"),
+        "type": (a.get("activityTypeDTO") or {}).get("typeKey"),
+        "start": s.get("startTimeLocal"),
+        "description": a.get("description"),
+        "duration_min": round((s.get("duration") or 0) / 60, 1),
+        "distance_km": round(s["distance"] / 1000, 2) if s.get("distance") else None,
+        "avg_hr": s.get("averageHR"),
+        "max_hr": s.get("maxHR"),
+        "kcal": s.get("calories"),
+    }
+    try:
+        series = activities.leer_series(_cliente().activity_sets(activity_id))
+    except Exception as exc:  # noqa: BLE001
+        log.info("Sin series para la actividad %s (%s)", activity_id, exc)
+        series = []
+    if series:
+        fuera["sets"] = series
+    return fuera
+
+
+@mcp.tool()
+def update_activity(
+    activity_id: int,
+    name: str | None = None,
+    activity_type: str | None = None,
+    description: str | None = None,
+) -> dict:
+    """Corrige los datos generales de una sesion ya registrada: como se llama,
+    que deporte fue y una nota.
+
+    Solo toca lo que mandes. Sirve para cuando el reloj clasifico mal la sesion
+    (una cinta como 'walking', unas dominadas como 'cardio_training') o la dejo
+    con el nombre generico que pone el.
+
+    `activity_type` es la clave de Garmin en ingles: running, walking,
+    strength_training, cycling, indoor_cycling, hiking, cardio_training, yoga,
+    elliptical, other. Si no existe, el error trae las parecidas.
+
+    Para arreglar las series de una sesion de fuerza es update_activity_sets.
+    """
+    cli = _cliente()
+    cambios: dict = {"activity_id": activity_id}
+    if name is not None:
+        cli.set_activity_name(activity_id, name)
+        cambios["name"] = name
+    if activity_type is not None:
+        tipo = activities.resolver_tipo(activity_type, cli.activity_types())
+        cli.set_activity_type(activity_id, tipo)
+        cambios["type"] = tipo["typeKey"]
+    if description is not None:
+        cli.set_activity_description(activity_id, description)
+        cambios["description"] = description
+    if len(cambios) == 1:
+        return {**cambios, "updated": False, "note": "No se indico nada que cambiar."}
+    _refrescar_cache(_dia_de(cli.activity(activity_id)))
+    return {**cambios, "updated": True}
+
+
+@mcp.tool()
+def update_activity_sets(activity_id: int, sets: list[activities.Serie]) -> dict:
+    """Reescribe las series de una sesion de fuerza ya hecha: que ejercicio era,
+    cuantas repeticiones y con cuanto peso.
+
+    Es la herramienta para lo que el reloj no puede saber. Una pulsera detecta
+    que te mueves y cuenta repeticiones a ojo, pero no sabe si eso era press de
+    banca o remo, ni con cuantos kilos: guarda la serie como UNKNOWN y sin
+    carga. Al ponerselo, la sesion pasa a contar en el grupo muscular que toca
+    y el peso queda registrado para poder seguir la progresion.
+
+    Lee antes con get_activity: sus `sets` ya vienen con este formato. La lista
+    va COMPLETA y en orden, descansos incluidos, porque reemplaza a la anterior
+    entera; si mandas menos series de las que hay, las que falten se pierden.
+
+    Los tiempos no hace falta tocarlos: cada serie hereda el momento y la
+    duracion que midio el reloj, que eso si lo tiene bien.
+    """
+    cli = _cliente()
+    actual = cli.activity_sets(activity_id) or {}
+    originales = actual.get("exerciseSets") or []
+    datos = [s.model_dump(exclude_none=True) for s in sets]
+
+    inicio = None
+    if not originales:  # sesion sin series grabadas: hay que anclar la primera
+        inicio = ((cli.activity(activity_id).get("summaryDTO") or {}).get("startTimeGMT"))
+
+    payload = activities.a_payload(activity_id, datos, originales, inicio)
+    avisos: list[str] = []
+    try:
+        cli.set_activity_sets(activity_id, payload)
+    except Exception as exc:  # noqa: BLE001
+        # Garmin valida la variante concreta contra su propio enum y rechaza el
+        # PUT entero si no la reconoce, aunque la categoria sea buena. Antes de
+        # dar la correccion por perdida, se reintenta con solo el grupo
+        # muscular, que es el dato que de verdad hace falta conservar.
+        if not any(s.get("exercise") for s in datos):
+            raise
+        log.warning("Garmin rechazo las variantes en %s (%s); reintento sin ellas", activity_id, exc)
+        cli.set_activity_sets(
+            activity_id, activities.a_payload(activity_id, datos, originales, inicio, con_variante=False)
+        )
+        avisos.append(
+            "Garmin no acepto las variantes concretas de ejercicio en esta sesion: "
+            "se guardo solo el grupo muscular de cada una."
+        )
+
+    sin = activities.sin_ejercicio(datos)
+    if sin:
+        avisos.append(f"{sin} series de trabajo sin `exercise`: seguiran sin grupo muscular.")
+    resultado = {"activity_id": activity_id, "sets": len(datos), "updated": True}
+    if avisos:
+        resultado["warnings"] = avisos
+    _refrescar_cache(_dia_de(cli.activity(activity_id)))
+    return resultado
+
+
+@mcp.tool()
+def add_activity(
+    name: str,
+    activity_type: str,
+    start: str,
+    duration_min: float,
+    distance_km: float | None = None,
+) -> dict:
+    """Da de alta a mano una sesion que el reloj no llego a grabar.
+
+    Para cuando se entreno sin el puesto, se quedo sin bateria o se olvido
+    darle a empezar. `start` es la hora local de inicio ('2026-08-13T21:30:00'),
+    y `activity_type` la clave de Garmin en ingles (walking, running,
+    strength_training...).
+
+    Nace privada y sin frecuencia cardiaca, porque no hubo nada que la midiera:
+    las calorias las estima Garmin con el perfil. Si la sesion si se grabo y lo
+    que pasa es que esta mal, corrigela con update_activity en vez de crear otra.
+    """
+    cli = _cliente()
+    tipo = activities.resolver_tipo(activity_type, cli.activity_types())
+    payload = activities.payload_manual(
+        name, tipo, activities.normalizar_inicio(start), settings.timezone,
+        duration_min, distance_km,
+    )
+    creada = cli.create_manual_activity(payload) or {}
+    nueva = creada.get("activityId")
+    _refrescar_cache(_dia_de(creada) or activities.normalizar_inicio(start)[:10])
+    return {"activity_id": nueva, "name": name, "type": tipo["typeKey"], "created": True}
 
 
 @mcp.tool()

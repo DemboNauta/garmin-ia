@@ -118,6 +118,17 @@ def limpiar_cache_vacia(user_id: str) -> int:
     return len(vacios)
 
 
+def refrescar_actividades(user_id: str, day: dt.date) -> None:
+    """Recachea las actividades de un dia, p.ej. tras corregir una.
+
+    Sin esto get_activities seguiria sirviendo la copia vieja: solo vuelve a
+    pedirlas a Garmin cuando no tiene ninguna en el rango, asi que una sesion
+    editada se veria con el nombre y el tipo de antes.
+    """
+    for act in para_usuario(user_id).activities(day, day):
+        store.save_activity(user_id, act)
+
+
 def sync_range(user_id: str, days: int = 7) -> dict:
     end = today()
     start = end - dt.timedelta(days=days - 1)

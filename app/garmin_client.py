@@ -35,6 +35,7 @@ class GarminClient:
     def __init__(self, user_id: str) -> None:
         self.user_id = user_id
         self._api: Garmin | None = None
+        self._tipos: list[dict] | None = None
 
     # ------------------------------------------------------------------ auth
     def api(self) -> Garmin:
@@ -123,6 +124,55 @@ class GarminClient:
 
     def activity_detail(self, activity_id: int | str) -> dict:
         return self._call("get_activity_details", activity_id)
+
+    def activity(self, activity_id: int | str) -> dict:
+        """Resumen de una sesion concreta, con su tipo y sus totales."""
+        return self._call("get_activity", str(activity_id))
+
+    def activity_sets(self, activity_id: int | str) -> dict:
+        """Series de una sesion de fuerza, tal y como las grabo el reloj."""
+        return self._call("get_activity_exercise_sets", activity_id)
+
+    def activity_types(self) -> list[dict]:
+        """Catalogo de tipos de actividad. Cambia una vez cada varios años, asi
+        que se pide una sola vez por proceso: son ~180 entradas por peticion."""
+        with _lock:
+            if self._tipos is not None:
+                return self._tipos
+        tipos = self._call("get_activity_types") or []
+        with _lock:
+            self._tipos = tipos
+        return tipos
+
+    # ------------------------------------------- correccion de lo ya registrado
+    def set_activity_sets(self, activity_id: int | str, payload: dict) -> Any:
+        """Reemplaza las series de una sesion.
+
+        Como en los entrenamientos, Garmin no admite parches: el PUT sustituye
+        la lista entera. Rechaza con 400 las variantes de ejercicio que no
+        conoce, aunque la categoria si valga.
+        """
+        return self._call("set_activity_exercise_sets", activity_id, payload)
+
+    def set_activity_name(self, activity_id: int | str, name: str) -> Any:
+        return self._call("set_activity_name", str(activity_id), name)
+
+    def set_activity_description(self, activity_id: int | str, description: str) -> Any:
+        return self._call("set_activity_description", str(activity_id), description)
+
+    def set_activity_type(self, activity_id: int | str, tipo: dict) -> Any:
+        """Cambia el deporte de una sesion (el reloj a veces se equivoca)."""
+        return self._call(
+            "set_activity_type",
+            str(activity_id),
+            tipo["typeId"],
+            tipo["typeKey"],
+            tipo.get("parentTypeId"),
+        )
+
+    def create_manual_activity(self, payload: dict) -> Any:
+        """Da de alta una sesion que el reloj no llego a grabar."""
+        return self._call("create_manual_activity_from_json", payload)
 
     # ------------------------------------------------------- escritura (beta)
     def create_workout(self, payload: dict) -> dict:
