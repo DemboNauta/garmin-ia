@@ -10,6 +10,14 @@ services:
     # el firewall del host escribiendo reglas propias en iptables.
     ports:
       - "127.0.0.1:8000:8000"
+    # La imagen no trae curl; python ya esta dentro.
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     security_opt:
       - no-new-privileges:true
     cap_drop:

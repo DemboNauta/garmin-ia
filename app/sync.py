@@ -79,10 +79,43 @@ def _first(value: Any, key: str) -> Any:
     return value.get(key) if isinstance(value, dict) else None
 
 
+class SincronizacionVacia(RuntimeError):
+    """Garmin no devolvio ni un bloque util para ese dia."""
+
+
+def tiene_datos(raw: dict) -> bool:
+    """Distingue una foto real de una fallida.
+
+    daily_snapshot degrada bloque a bloque, asi que un fallo devuelve la misma
+    forma que un dia legitimo: todo a None. Si eso se guarda, la fila envenena
+    la cache para siempre, porque get_metrics solo resincroniza cuando NO hay
+    fila, no cuando la que hay esta vacia.
+    """
+    return any(v is not None for k, v in raw.items() if k != "date")
+
+
 def sync_day(day: dt.date) -> dict:
     raw = client.daily_snapshot(day)
+    if not tiene_datos(raw):
+        raise SincronizacionVacia(
+            f"Garmin no devolvio ningun dato para {day.isoformat()}; no se cachea."
+        )
     store.save_daily(day, raw)
     return flatten_daily(raw)
+
+
+def limpiar_cache_vacia() -> int:
+    """Borra los dias cacheados sin un solo dato y devuelve cuantos eran.
+
+    Repara bases que se llenaron antes de que existieran los tokens, que es lo
+    que pasa si el servicio arranca antes del primer login.
+    """
+    vacios = [d for d, raw in store.all_daily() if not tiene_datos(raw)]
+    for day in vacios:
+        store.delete_daily(day)
+    if vacios:
+        log.warning("Purgados %d dias vacios de la cache: %s", len(vacios), ", ".join(vacios))
+    return len(vacios)
 
 
 def sync_range(days: int = 7) -> dict:

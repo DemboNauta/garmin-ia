@@ -99,6 +99,10 @@ class GarminClient:
         for key, (fn, args) in blocks.items():
             try:
                 out[key] = self._call(fn, *args)
+            except GarminAuthError:
+                # Sin sesion no hay bloque que valga: reintentar los otros siete
+                # solo sirve para devolver una foto vacia que parece un dia real.
+                raise
             except Exception as exc:
                 out[key] = None
                 log.info("Bloque %s no disponible para %s (%s)", key, iso, exc)

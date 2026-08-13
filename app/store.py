@@ -74,6 +74,18 @@ def get_daily_range(start: dt.date, end: dt.date) -> list[dict]:
     return [json.loads(r["payload"]) for r in rows]
 
 
+def all_daily() -> list[tuple[str, dict]]:
+    """Todos los dias cacheados, para poder auditarlos."""
+    with conn() as c:
+        rows = c.execute("SELECT day, payload FROM daily ORDER BY day").fetchall()
+    return [(r["day"], json.loads(r["payload"])) for r in rows]
+
+
+def delete_daily(day: str) -> None:
+    with conn() as c:
+        c.execute("DELETE FROM daily WHERE day=?", (day,))
+
+
 def save_activity(activity: dict) -> None:
     aid = str(activity.get("activityId"))
     day = (activity.get("startTimeLocal") or "")[:10]

@@ -112,6 +112,17 @@ Desde fuera del VPS, el 8000 debe estar mudo:
 nc -zv TU_IP 8000    # connection refused / timeout
 ```
 
+Y que los datos fluyan de verdad, no solo que el servicio responda:
+
+```bash
+curl -X POST 'https://garmin.tu-dominio.com/sync?days=2' -H "Authorization: Bearer TU_TOKEN"
+```
+
+Tiene que devolver `"errors": []` y un `synced_days` mayor que cero. Si trae
+errores de sesión, el login del paso 4 no cuajó: repítelo. El servicio ya no
+cachea días vacíos ni los cuenta como sincronizados, así que un `synced_days: 0`
+significa exactamente eso y no se queda pegado en la base de datos.
+
 ## 8. Conectar el cliente MCP
 
 ```bash

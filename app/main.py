@@ -69,6 +69,8 @@ class BearerAuthMiddleware:
 async def lifespan(app: FastAPI):
     _check_token_config()
     store.init()
+    # Repara una cache envenenada por arranques anteriores sin sesion valida.
+    sync.limpiar_cache_vacia()
     if settings.sync_enabled:
         scheduler.add_job(
             lambda: log.info("Sync automatico: %s", sync.sync_range(settings.sync_backfill_days)),
