@@ -16,7 +16,9 @@ from .garmin_client import para_usuario
 from .identity import usuario_actual
 
 INSTRUCCIONES = """\
-Datos de Garmin Connect de un unico usuario, y escritura de entrenamientos.
+Datos de Garmin Connect de quien te esta hablando, y escritura de entrenamientos
+en su cuenta. Cada credencial ve solo lo suyo: no hay forma de consultar los
+datos de otra persona, ni falta.
 
 Antes de proponer una sesion, mira get_today: readiness, sueño y HRV mandan
 sobre cualquier plan previo.

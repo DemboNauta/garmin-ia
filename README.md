@@ -33,11 +33,37 @@ docker compose up -d
 curl localhost:8000/health
 ```
 
-Detrás de un Caddy o Nginx con TLS: el endpoint MCP es `https://tu-dominio/mcp/`,
-con cabecera `Authorization: Bearer <GB_API_TOKEN>`. La API REST y el endpoint MCP
-exigen ese bearer; solo `/health` es público.
+Detrás de un Caddy o Nginx con TLS: el endpoint MCP es `https://tu-dominio/mcp/`.
+Solo `/health` y la portada son públicos.
 
 Para el despliegue completo en servidor, ver **[DEPLOY.md](DEPLOY.md)**.
+
+## Usuarios
+
+El servicio es multiusuario y cerrado: cada persona ve solo sus datos y solo
+entra quien reciba una invitación.
+
+```bash
+python -m app.admin invitar amigo@ejemplo.com   # devuelve un enlace de un solo uso
+python -m app.admin usuarios                    # quién hay dado de alta
+python -m app.admin borrar <user_id>            # borra la cuenta y todos sus datos
+```
+
+Quien recibe el enlace crea su cuenta y vincula Garmin **desde el navegador**.
+Las credenciales de Garmin no se piden nunca por una herramienta MCP: si se
+hiciera, la contraseña pasaría por el contexto del modelo y quedaría en el
+historial de la conversación. De ese login solo se guarda el token OAuth, cifrado
+con `GB_ENCRYPTION_KEY`.
+
+### Conexión desde claude.ai o ChatGPT
+
+Se añade como conector personalizado con la URL `https://tu-dominio/mcp`. La
+autenticación es **OAuth 2.1** con PKCE y registro dinámico de clientes: es lo
+único que aceptan esos clientes, que no admiten cabeceras propias, y la
+especificación MCP prohíbe el token en la URL.
+
+`GB_API_TOKEN` sigue existiendo como acceso del dueño para administración y para
+clientes de línea de comandos como Claude Code.
 
 ## Herramientas MCP
 
