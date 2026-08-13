@@ -1,0 +1,22 @@
+[Unit]
+Description=Garmin Bridge (FastAPI + MCP)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/garmin-ia
+# --workers 1 no es negociable: el lifespan arranca un BackgroundScheduler y el
+# session_manager de MCP guarda las sesiones en memoria del proceso. Con varios
+# workers habria N schedulers machacando Garmin y sesiones MCP rotas.
+#
+# Sin EnvironmentFile a proposito: pydantic-settings ya lee el .env del
+# WorkingDirectory, y systemd reinterpretaria las comillas por su cuenta.
+ExecStart=/root/garmin-ia/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8003 --workers 1 --proxy-headers --forwarded-allow-ips="127.0.0.1"
+Restart=always
+RestartSec=3
+StandardOutput=append:/root/garmin-ia/logs/api.log
+StandardError=append:/root/garmin-ia/logs/api.err
+
+[Install]
+WantedBy=multi-user.target

@@ -1,6 +1,9 @@
 # Credenciales reales — NUNCA subir
 .env
 
+# Notas locales de despliegue (IP y disposición del VPS)
+CLAUDE.local.md
+
 # Datos y tokens OAuth de Garmin
 data/
 *.db
