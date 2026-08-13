@@ -121,11 +121,37 @@ class GarminClient:
         """
         return self._call("upload_workout", payload)
 
-    def schedule_workout(self, workout_id: int, day: dt.date) -> dict:
-        return self._call("schedule_workout", workout_id, day.isoformat())
+    def workout_detail(self, workout_id: int | str) -> dict:
+        """Estructura completa de un entrenamiento (la que hay que editar)."""
+        return self._call("get_workout_by_id", workout_id)
+
+    def update_workout(self, workout_id: int | str, payload: dict) -> dict:
+        """Reemplaza un entrenamiento entero.
+
+        Garmin no admite parches: el PUT sustituye toda la estructura. Conserva
+        el id, asi que las programaciones de calendario que apunten a el siguen
+        siendo validas y no hay que reprogramar tras editar el contenido.
+        """
+        return self._call("update_workout", workout_id, payload)
+
+    def delete_workout(self, workout_id: int | str) -> Any:
+        return self._call("delete_workout", workout_id)
 
     def list_workouts(self, limit: int = 20) -> list[dict]:
         return self._call("get_workouts", 0, limit) or []
+
+    # ------------------------------------------------------------- calendario
+    def schedule_workout(self, workout_id: int, day: dt.date) -> dict:
+        return self._call("schedule_workout", workout_id, day.isoformat())
+
+    def scheduled_workouts(self, year: int, month: int) -> Any:
+        """Lo programado en un mes. De aqui sale el id de programacion, que NO
+        es el id del entrenamiento y es el unico que acepta unschedule."""
+        return self._call("get_scheduled_workouts", year, month)
+
+    def unschedule_workout(self, schedule_id: int | str) -> Any:
+        """Saca del calendario sin borrar la plantilla del entrenamiento."""
+        return self._call("unschedule_workout", schedule_id)
 
 
 client = GarminClient()

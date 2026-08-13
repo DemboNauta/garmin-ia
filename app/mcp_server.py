@@ -149,3 +149,138 @@ def list_workouts(limit: int = 20) -> list[dict]:
          "updated": w.get("updateDate")}
         for w in client.list_workouts(limit)
     ]
+
+
+# De la condicion de fin de Garmin a la clave que usa el spec.
+_CLAVE_VALOR = {"reps": "reps", "time": "seconds", "distance": "meters"}
+
+
+def _leer_pasos(pasos: list[dict]) -> list[dict]:
+    """DTO de Garmin -> pasos con la MISMA forma que acepta create_workout.
+
+    Simetrico a proposito: lo que devuelve get_workout se puede meter tal cual
+    en update_workout sin traducir nada, que es como se edita un entrenamiento.
+    """
+    out: list[dict] = []
+    for p in pasos or []:
+        if p.get("workoutSteps"):
+            out.append({
+                "repeat": p.get("numberOfIterations"),
+                "steps": _leer_pasos(p["workoutSteps"]),
+            })
+            continue
+        peso = p.get("weightValue")
+        paso = {
+            "kind": (p.get("stepType") or {}).get("stepTypeKey"),
+            # Nombre del catalogo, no el enum, porque es lo que espera el spec.
+            "exercise": workouts.nombre_visible(p.get("category"), p.get("exerciseName")),
+            "weight_kg": peso / 1000 if peso else None,  # Garmin lo guarda en gramos
+            "hr_zone": p.get("zoneNumber"),
+            "note": p.get("description"),
+        }
+        clave = _CLAVE_VALOR.get((p.get("endCondition") or {}).get("conditionTypeKey"))
+        if clave and p.get("endConditionValue") is not None:
+            valor = p["endConditionValue"]
+            paso[clave] = int(valor) if clave in ("reps", "seconds") else valor
+        out.append({k: v for k, v in paso.items() if v is not None})
+    return out
+
+
+def _grupos_musculares(pasos: list[dict]) -> list[str]:
+    """Categorias distintas que toca el entrenamiento, en orden de aparicion."""
+    vistos: list[str] = []
+    for p in pasos or []:
+        if p.get("workoutSteps"):
+            for g in _grupos_musculares(p["workoutSteps"]):
+                if g not in vistos:
+                    vistos.append(g)
+        elif p.get("category") and p["category"] not in vistos:
+            vistos.append(p["category"])
+    return vistos
+
+
+@mcp.tool()
+def get_workout(workout_id: int, raw: bool = False) -> dict:
+    """Contenido completo de un entrenamiento: sus pasos, ejercicios y grupos
+    musculares. Mira esto antes de editar, para saber que hay que cambiar.
+
+    Los `steps` vienen con la misma forma que acepta create_workout, asi que
+    para editar basta con modificar lo que haga falta y pasarlos a
+    update_workout. `muscle_groups` resume que trabaja la sesion.
+
+    Con raw=True devuelve el DTO crudo de Garmin, mucho mas verboso.
+    """
+    w = client.workout_detail(workout_id)
+    if raw:
+        return w
+    brutos = [s for seg in w.get("workoutSegments") or [] for s in seg.get("workoutSteps") or []]
+    return {
+        "id": w.get("workoutId"),
+        "name": w.get("workoutName"),
+        "sport": (w.get("sportType") or {}).get("sportTypeKey"),
+        "description": w.get("description"),
+        "muscle_groups": _grupos_musculares(brutos),
+        "steps": _leer_pasos(brutos),
+    }
+
+
+@mcp.tool()
+def update_workout(workout_id: int, spec: dict) -> dict:
+    """Reemplaza un entrenamiento existente. `spec` tiene el mismo formato que
+    create_workout y debe ir COMPLETO: Garmin no admite parches, el PUT
+    sustituye toda la estructura, asi que lo que no mandes se pierde.
+
+    El entrenamiento conserva su id, de modo que si estaba programado en el
+    calendario sigue estandolo: editar el contenido NO obliga a reprogramar.
+    Para mover la fecha se usan unschedule_workout y schedule_workout.
+    """
+    payload = workouts.from_spec(spec)
+    updated = client.update_workout(workout_id, payload)
+    return {"workout_id": workout_id, "updated": True, "name": (updated or {}).get("workoutName")}
+
+
+@mcp.tool()
+def delete_workout(workout_id: int) -> dict:
+    """Borra un entrenamiento y, con el, cualquier programacion que lo apunte."""
+    client.delete_workout(workout_id)
+    return {"workout_id": workout_id, "deleted": True}
+
+
+@mcp.tool()
+def list_scheduled(year: int, month: int) -> list[dict]:
+    """Entrenamientos programados en un mes (month va de 1 a 12).
+
+    Devuelve `schedule_id`, que es lo unico que acepta unschedule_workout y que
+    NO coincide con el id del entrenamiento.
+    """
+    datos = client.scheduled_workouts(year, month) or {}
+    items = datos.get("calendarItems") if isinstance(datos, dict) else datos
+    salida = []
+    for it in items or []:
+        if it.get("itemType") not in (None, "workout"):
+            continue
+        salida.append({
+            "schedule_id": it.get("id"),
+            "workout_id": it.get("workoutId"),
+            "name": it.get("title"),
+            "date": it.get("date"),
+        })
+    return salida
+
+
+@mcp.tool()
+def schedule_workout(workout_id: int, schedule_date: str) -> dict:
+    """Programa un entrenamiento ya existente en una fecha (YYYY-MM-DD)."""
+    client.schedule_workout(workout_id, dt.date.fromisoformat(schedule_date))
+    return {"workout_id": workout_id, "scheduled_for": schedule_date}
+
+
+@mcp.tool()
+def unschedule_workout(schedule_id: int) -> dict:
+    """Saca un entrenamiento del calendario sin borrarlo.
+
+    Necesita el `schedule_id` que devuelve list_scheduled, no el id del
+    entrenamiento. Para mover una sesion de dia: unschedule + schedule_workout.
+    """
+    client.unschedule_workout(schedule_id)
+    return {"schedule_id": schedule_id, "unscheduled": True}

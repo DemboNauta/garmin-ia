@@ -66,6 +66,24 @@ def categorias() -> list[str]:
     return list(_catalogo.CATEGORIES)
 
 
+# Indice inverso: de los enums que devuelve Garmin al nombre visible.
+_POR_ENUM: dict[tuple[str, str], str] = {
+    (e["category"], e["exercise"]): e["name"] for e in _catalogo.EXERCISES
+}
+
+
+def nombre_visible(category: str | None, exercise: str | None) -> str | None:
+    """(categoria, variante) de Garmin -> nombre del catalogo.
+
+    Lo que se lee de un entrenamiento tiene que poder reenviarse tal cual al
+    editarlo, y Garmin devuelve enums (BARBELL_BACK_SQUAT) donde el catalogo
+    usa nombres visibles (Barbell Back Squat).
+    """
+    if not category:
+        return None
+    return _POR_ENUM.get((category, exercise or ""))
+
+
 def resolver_ejercicio(nombre: str) -> dict[str, str]:
     """Nombre visible -> entrada del catalogo (categoria + variante).
 
@@ -76,7 +94,12 @@ def resolver_ejercicio(nombre: str) -> dict[str, str]:
     entrada = _catalogo.resolve(nombre)
     if entrada:
         return entrada
-    candidatos = buscar_ejercicios(nombre)
+    # Se acepta tambien el enum crudo, porque es lo que sale de get_workout y
+    # sin esto el ciclo leer -> editar -> guardar se romperia.
+    por_enum = [e for e in _catalogo.EXERCISES if e["exercise"] == nombre]
+    if len(por_enum) == 1:
+        return por_enum[0]
+    candidatos = por_enum or buscar_ejercicios(nombre)
     if len(candidatos) == 1:  # coincidencia parcial inequivoca
         return candidatos[0]
     if candidatos:
