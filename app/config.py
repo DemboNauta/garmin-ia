@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # que no sea localhost. Detras de un proxy hay que declarar el de verdad.
     allowed_hosts: str = ""
 
+    # URL publica del servicio, tal cual la ve el navegador. OAuth la necesita
+    # para los metadatos y las redirecciones, y tiene que ser HTTPS: por ahi
+    # viajan codigos de autorizacion.
+    public_url: str = "http://127.0.0.1:8000"
+
     # Zona horaria para resolver "hoy"
     timezone: str = "Europe/Madrid"
 

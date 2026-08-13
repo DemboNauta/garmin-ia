@@ -18,10 +18,50 @@ log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
-    user_id    TEXT PRIMARY KEY,
+    user_id       TEXT PRIMARY KEY,
+    email         TEXT,
+    created_at    TEXT NOT NULL,
+    password_hash TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL;
+
+-- Invitaciones: el servicio es cerrado, solo entra quien reciba una.
+-- Se guarda el hash, no el codigo, para que una copia de la base no valga
+-- para darse de alta.
+CREATE TABLE IF NOT EXISTS invites (
+    code_hash  TEXT PRIMARY KEY,
     email      TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at    TEXT
+);
+
+-- OAuth. Los secretos (codigos y tokens) se guardan hasheados por el mismo
+-- motivo: son credenciales, no datos.
+CREATE TABLE IF NOT EXISTS oauth_clients (
+    client_id  TEXT PRIMARY KEY,
+    info       TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS oauth_pending (
+    pending_id TEXT PRIMARY KEY,
+    client_id  TEXT NOT NULL,
+    params     TEXT NOT NULL,
+    expires_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_codes (
+    code_hash  TEXT PRIMARY KEY,
+    payload    TEXT NOT NULL,
+    expires_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+    token_hash TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL CHECK (kind IN ('access', 'refresh')),
+    payload    TEXT NOT NULL,
+    user_id    TEXT NOT NULL,
+    expires_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_tokens_user ON oauth_tokens(user_id);
 -- Los tokens OAuth de Garmin van cifrados: ver app/crypto.py. Se guardan como
 -- el JSON que la propia libreria sabe cargar en linea, sin tocar disco.
 CREATE TABLE IF NOT EXISTS garmin_sessions (
@@ -91,13 +131,25 @@ def _migrar_a_multiusuario(c: sqlite3.Connection) -> None:
     c.executescript("DROP TABLE daily_v1; DROP TABLE activities_v1;")
 
 
+def _asegurar_columna(c: sqlite3.Connection, tabla: str, columna: str, tipo: str) -> None:
+    """Añade una columna si falta.
+
+    CREATE TABLE IF NOT EXISTS no toca las tablas que ya existen, asi que las
+    bases anteriores se quedarian sin las columnas nuevas.
+    """
+    existentes = {r["name"] for r in c.execute(f"PRAGMA table_info({tabla})")}
+    if columna not in existentes:
+        log.warning("Anadiendo columna %s.%s", tabla, columna)
+        c.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}")
+
+
 def init() -> None:
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
     with conn() as c:
         if _necesita_migracion(c):
             _migrar_a_multiusuario(c)
-        else:
-            c.executescript(SCHEMA)
+        c.executescript(SCHEMA)
+        _asegurar_columna(c, "users", "password_hash", "TEXT")
 
 
 @contextmanager

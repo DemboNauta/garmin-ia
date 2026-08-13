@@ -7,12 +7,20 @@ from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import Depends, FastAPI, Header, HTTPException
+from mcp.server.auth.routes import (
+    build_resource_metadata_url,
+    create_auth_routes,
+    create_protected_resource_routes,
+)
+from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOptions
+from pydantic import AnyHttpUrl
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from . import garmin_client, identity, store, sync
+from . import garmin_client, identity, store, sync, web
 from .config import settings
 from .mcp_server import mcp
+from .oauth_provider import proveedor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("garmin-bridge")
@@ -50,8 +58,26 @@ def usuario_autenticado(authorization: str = Header(default="")) -> str:
     return identity.dueño()
 
 
+async def _resolver_usuario(autorizacion: str) -> str | None:
+    """De la cabecera Authorization al usuario, o None si no vale.
+
+    Se aceptan dos credenciales: un token OAuth (el camino de los usuarios, que
+    llegan por claude.ai o ChatGPT) y el bearer estatico del dueño, que se
+    conserva para administracion y para clientes de linea de comandos.
+    """
+    if not autorizacion.startswith("Bearer "):
+        return None
+    token = autorizacion[7:]
+    acceso = await proveedor.load_access_token(token)
+    if acceso and acceso.subject:
+        return acceso.subject
+    if _token_valido(autorizacion):
+        return identity.dueño()
+    return None
+
+
 class BearerAuthMiddleware:
-    """Exige el mismo bearer que la API REST a una sub-app ASGI montada.
+    """Autentica la sub-app MCP y fija de quien son los datos.
 
     El endpoint MCP se monta con app.mount(), asi que no pasa por las
     dependencias de FastAPI: sin esto quedaria publico.
@@ -66,13 +92,20 @@ class BearerAuthMiddleware:
             return
         cabeceras = dict(scope.get("headers") or [])
         autorizacion = cabeceras.get(b"authorization", b"").decode("latin-1")
-        if not _token_valido(autorizacion):
-            respuesta = JSONResponse({"detail": "Token invalido"}, status_code=401)
+        usuario = await _resolver_usuario(autorizacion)
+        if usuario is None:
+            # La RFC 9728 exige apuntar aqui a los metadatos del recurso: es
+            # como el cliente descubre contra que servidor tiene que autenticarse.
+            respuesta = JSONResponse(
+                {"detail": "Token invalido"},
+                status_code=401,
+                headers={
+                    "WWW-Authenticate": f'Bearer resource_metadata="{URL_METADATOS}"'
+                },
+            )
             await respuesta(scope, receive, send)
             return
-        # El bearer identifica al dueño. Cuando entre OAuth, aqui se resolvera
-        # el token al usuario que corresponda y las herramientas no cambian.
-        testigo = identity.fijar_usuario(identity.dueño())
+        testigo = identity.fijar_usuario(usuario)
         try:
             await self.app(scope, receive, send)
         finally:
@@ -100,7 +133,36 @@ async def lifespan(app: FastAPI):
         scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="Garmin Bridge", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Garmin Bridge", version="0.2.0", lifespan=lifespan)
+
+# --- OAuth 2.1 -------------------------------------------------------------
+# claude.ai y ChatGPT solo saben autenticarse por OAuth: no admiten cabeceras
+# propias, y la especificacion MCP prohibe el token en la URL. El protocolo lo
+# implementa el SDK; nosotros ponemos el proveedor y las paginas de login.
+_emisor = AnyHttpUrl(settings.public_url)
+_recurso = AnyHttpUrl(f"{settings.public_url}/mcp")
+# La RFC 9728 intercala /.well-known/... entre el host y el path del recurso, o
+# sea /.well-known/oauth-protected-resource/mcp. Se calcula con el helper del
+# SDK para que la cabecera WWW-Authenticate no se desvie de la ruta registrada.
+URL_METADATOS = build_resource_metadata_url(_recurso)
+
+for ruta in create_auth_routes(
+    provider=proveedor,
+    issuer_url=_emisor,
+    client_registration_options=ClientRegistrationOptions(enabled=True),
+    revocation_options=RevocationOptions(enabled=True),
+):
+    app.router.routes.append(ruta)
+
+# RFC 9728: dice a los clientes donde esta el servidor de autorizacion.
+for ruta in create_protected_resource_routes(
+    resource_url=_recurso,
+    authorization_servers=[_emisor],
+    resource_name="Garmin Bridge",
+):
+    app.router.routes.append(ruta)
+
+app.include_router(web.router)
 # El endpoint MCP queda en /mcp — es el que se configura como conector remoto.
 # Va envuelto en BearerAuthMiddleware: expone datos de salud y permite escribir
 # en la cuenta de Garmin, asi que no puede quedar publico.
