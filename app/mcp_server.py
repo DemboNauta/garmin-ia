@@ -11,7 +11,7 @@ import logging
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import activities, profile, store, sync, workouts
+from . import activities, profile, store, sync, weight, workouts
 from .config import settings
 from .garmin_client import para_usuario
 from .identity import usuario_actual
@@ -29,6 +29,8 @@ readiness, sueño y HRV mandan sobre cualquier plan previo.
 
 Cuando cuente algo estable de su forma de entrenar, guardalo con
 update_profile en vez de fiarlo a la memoria de la conversacion, que se pierde.
+El peso corporal no va ahi: se lee con get_weight y se apunta con log_weight,
+que lo dejan en Garmin con su fecha y hacen serie.
 
 Para crear fuerza, el orden es: find_exercises para dar con el nombre exacto
 (el catalogo esta SOLO en ingles) y luego create_workout con ese nombre en
@@ -335,6 +337,36 @@ def add_activity(
     nueva = creada.get("activityId")
     _refrescar_cache(_dia_de(creada) or activities.normalizar_inicio(start)[:10])
     return {"activity_id": nueva, "name": name, "type": tipo["typeKey"], "created": True}
+
+
+@mcp.tool()
+def get_weight(days: int = 90) -> dict:
+    """Peso corporal: los pesajes de los ultimos N dias y cuanto se ha movido.
+
+    Miralo antes de hablar de cargas relativas (el peso corporal es la carga en
+    dominadas, flexiones o fondos), de composicion o de cualquier objetivo que
+    dependa de la bascula. La serie es corta y con huecos, porque casi nadie se
+    pesa a diario: por eso el periodo por defecto es largo.
+
+    `body_fat_pct` y `muscle_mass_kg` solo salen si la bascula los midio.
+    """
+    end = sync.today()
+    datos = _cliente().weigh_ins(end - dt.timedelta(days=days - 1), end)
+    return weight.resumen(datos, days)
+
+
+@mcp.tool()
+def log_weight(weight_kg: float, when: str | None = None) -> dict:
+    """Apunta un pesaje en Garmin Connect.
+
+    Para cuando lo diga en la conversacion ("hoy he pesado 89,5"). Sin fecha se
+    guarda ahora mismo; `when` acepta 'YYYY-MM-DD' (se apunta a las 8:00, hora
+    del pesaje de la mañana) o 'YYYY-MM-DDTHH:MM' si se sabe la hora.
+
+    Queda como pesaje manual, igual que si se hubiera tecleado en la app.
+    """
+    _cliente().add_weigh_in(weight_kg, weight.momento(when))
+    return {"weight_kg": weight_kg, "logged": True}
 
 
 @mcp.tool()

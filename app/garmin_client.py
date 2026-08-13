@@ -133,6 +133,14 @@ class GarminClient:
         """Series de una sesion de fuerza, tal y como las grabo el reloj."""
         return self._call("get_activity_exercise_sets", activity_id)
 
+    def weigh_ins(self, start: dt.date, end: dt.date) -> dict:
+        """Pesajes de un rango, con composicion corporal si la bascula la dio."""
+        return self._call("get_body_composition", start.isoformat(), end.isoformat()) or {}
+
+    def add_weigh_in(self, kilos: float, momento: str) -> Any:
+        """Apunta un pesaje. `momento` va en hora local y con desfase explicito."""
+        return self._call("add_weigh_in", kilos, "kg", momento)
+
     def activity_types(self) -> list[dict]:
         """Catalogo de tipos de actividad. Cambia una vez cada varios años, asi
         que se pide una sola vez por proceso: son ~180 entradas por peticion."""

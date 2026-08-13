@@ -54,6 +54,7 @@ muscular.
 | `get_metrics(days)` | Serie diaria de las ~15 métricas accionables |
 | `get_activities(days)` | Sesiones con FC media, ritmo y training effect |
 | `get_activity(id)` | Una sesión al detalle, con sus series |
+| `get_weight(days)` | Pesajes del periodo, con la media y el cambio |
 | `get_devices` | Qué Garmin hay vinculados y su última sincronización |
 
 | Corregir lo ya hecho | |
@@ -61,6 +62,7 @@ muscular.
 | `update_activity_sets(id, sets)` | Reescribe las series: ejercicio, repeticiones y peso |
 | `update_activity(id, ...)` | Arregla el nombre, el deporte o la nota |
 | `add_activity(...)` | Da de alta a mano lo que el reloj no llegó a grabar |
+| `log_weight(kg)` | Apunta un pesaje sin abrir la app |
 
 | Entrenamientos | |
 |---|---|
