@@ -63,18 +63,24 @@ def _hash_codigo(codigo: str) -> str:
     return hashlib.sha256(codigo.encode()).hexdigest()
 
 
-def crear_invitacion(email: str | None = None) -> str:
-    """Emite una invitacion y devuelve el codigo EN CLARO, la unica vez que se ve."""
+def crear_invitacion(email: str | None = None, user_id: str | None = None) -> str:
+    """Emite una invitacion y devuelve el codigo EN CLARO, la unica vez que se ve.
+
+    Con `user_id` no crea cuenta nueva: sirve para que una cuenta ya existente
+    (la del dueño, creada por la migracion) se ponga email y contraseña.
+    """
     codigo = secrets.token_urlsafe(32)
     ahora = dt.datetime.now(dt.timezone.utc)
     with store.conn() as c:
         c.execute(
-            "INSERT INTO invites(code_hash, email, created_at, expires_at) VALUES(?,?,?,?)",
+            "INSERT INTO invites(code_hash, email, created_at, expires_at, user_id) "
+            "VALUES(?,?,?,?,?)",
             (
                 _hash_codigo(codigo),
                 email,
                 ahora.isoformat(),
                 (ahora + dt.timedelta(days=_DIAS_INVITACION)).isoformat(),
+                user_id,
             ),
         )
     return codigo
@@ -102,15 +108,24 @@ def listar_invitaciones() -> list[dict]:
 
 # --------------------------------------------------------------------- usuarios
 def registrar_con_invitacion(codigo: str, email: str, password: str) -> str:
-    """Canjea la invitacion y crea la cuenta. Devuelve el user_id."""
+    """Canjea la invitacion y devuelve el user_id.
+
+    Si la invitacion apunta a un usuario existente le pone email y contraseña;
+    si no, crea la cuenta.
+    """
     _validar_password(password)
     email = email.strip().lower()
     if not email or "@" not in email:
         raise ErrorDeCuenta("Email no valido.")
-    if buscar_por_email(email):
+
+    invitacion = invitacion_valida(codigo)
+    if not invitacion:
+        raise ErrorDeCuenta("Invitacion invalida, caducada o ya usada.")
+    existente = buscar_por_email(email)
+    if existente and existente["user_id"] != invitacion.get("user_id"):
         raise ErrorDeCuenta("Ya existe una cuenta con ese email.")
 
-    user_id = f"u_{uuid.uuid4().hex[:16]}"
+    user_id = invitacion.get("user_id") or f"u_{uuid.uuid4().hex[:16]}"
     ahora = dt.datetime.now(dt.timezone.utc).isoformat()
     with store.conn() as c:
         # El UPDATE condicionado a used_at IS NULL evita que dos altas
@@ -121,11 +136,59 @@ def registrar_con_invitacion(codigo: str, email: str, password: str) -> str:
         )
         if cur.rowcount != 1:
             raise ErrorDeCuenta("Invitacion invalida o ya usada.")
-        c.execute(
-            "INSERT INTO users(user_id, email, created_at, password_hash) VALUES(?,?,?,?)",
-            (user_id, email, ahora, hashear_password(password)),
-        )
+        if invitacion.get("user_id"):
+            c.execute(
+                "UPDATE users SET email=?, password_hash=? WHERE user_id=?",
+                (email, hashear_password(password), user_id),
+            )
+        else:
+            c.execute(
+                "INSERT INTO users(user_id, email, created_at, password_hash) VALUES(?,?,?,?)",
+                (user_id, email, ahora, hashear_password(password)),
+            )
     return user_id
+
+
+# ------------------------------------------------------- sesiones de administracion
+_HORAS_SESION = 12
+
+
+def crear_sesion_admin(user_id: str) -> str:
+    token = secrets.token_urlsafe(32)
+    ahora = dt.datetime.now(dt.timezone.utc)
+    with store.conn() as c:
+        c.execute(
+            "INSERT INTO admin_sessions(token_hash, user_id, created_at, expires_at) "
+            "VALUES(?,?,?,?)",
+            (
+                _hash_codigo(token),
+                user_id,
+                ahora.isoformat(),
+                (ahora + dt.timedelta(hours=_HORAS_SESION)).timestamp(),
+            ),
+        )
+    return token
+
+
+def usuario_de_sesion(token: str | None) -> str | None:
+    if not token:
+        return None
+    with store.conn() as c:
+        fila = c.execute(
+            "SELECT user_id, expires_at FROM admin_sessions WHERE token_hash=?",
+            (_hash_codigo(token),),
+        ).fetchone()
+    if not fila or fila["expires_at"] < dt.datetime.now(dt.timezone.utc).timestamp():
+        return None
+    # Se comprueba en cada peticion: si se le quita el admin a alguien, su
+    # sesion abierta deja de valer al momento.
+    return fila["user_id"] if store.es_admin(fila["user_id"]) else None
+
+
+def cerrar_sesion(token: str | None) -> None:
+    if token:
+        with store.conn() as c:
+            c.execute("DELETE FROM admin_sessions WHERE token_hash=?", (_hash_codigo(token),))
 
 
 def buscar_por_email(email: str) -> dict | None:

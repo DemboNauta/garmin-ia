@@ -10,7 +10,7 @@ from __future__ import annotations
 import html
 import logging
 
-from fastapi import APIRouter, Form
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from . import accounts, garmin_client, store
@@ -132,6 +132,112 @@ def portada() -> HTMLResponse:
         f"acceso y no se guarda; el permiso queda cifrado en el servidor.</p>",
         ancho=True,
     )
+
+
+# ---------------------------------------------------------------------- admin
+_COOKIE = "gb_admin"
+
+
+def _cookie_segura(respuesta, token: str) -> None:
+    respuesta.set_cookie(
+        _COOKIE,
+        token,
+        httponly=True,                                  # fuera del alcance de JS
+        secure=settings.public_url.startswith("https"),  # solo por TLS
+        samesite="strict",                              # corta el CSRF entre sitios
+        max_age=12 * 3600,
+        path="/",
+    )
+
+
+@router.get("/admin", response_class=HTMLResponse)
+def panel(request: Request, error: str = "", nuevo: str = "") -> HTMLResponse:
+    user_id = accounts.usuario_de_sesion(request.cookies.get(_COOKIE))
+    if not user_id:
+        return _pagina(
+            "Administración",
+            f"<h1>Panel de administración</h1>"
+            f"<p class=sub>Entra con tu cuenta.</p>"
+            f"{_aviso(error) if error else ''}"
+            f"<form method=post action='/admin/entrar'>"
+            f"<label for=email>Email</label>"
+            f"<input id=email name=email type=email required autocomplete=username>"
+            f"<label for=password>Contraseña</label>"
+            f"<input id=password name=password type=password required "
+            f"autocomplete=current-password>"
+            f"<button type=submit>Entrar</button></form>",
+        )
+
+    recien = ""
+    if nuevo:
+        enlace = f"{settings.public_url}/invite/{nuevo}"
+        recien = (
+            f"<div class=ok><b>Invitación creada.</b> Cópiala ahora: no se puede "
+            f"volver a ver.</div><span class=url>{html.escape(enlace)}</span>"
+        )
+
+    filas = []
+    for u in store.listar_usuarios():
+        marca = " · admin" if u["is_admin"] else ""
+        garmin = "Garmin vinculado" if u["garmin_vinculado"] else "sin vincular"
+        filas.append(
+            f"<div class=dato><b>{html.escape(u['email'] or u['user_id'])}{marca}</b>"
+            f"<span>{garmin} · desde {u['created_at'][:10]}</span></div>"
+        )
+
+    pendientes = [i for i in accounts.listar_invitaciones() if not i["used_at"]]
+    lista_pendientes = "".join(
+        f"<div class=dato><b>{html.escape(i['email'] or 'sin email')}</b>"
+        f"<span>pendiente · caduca {i['expires_at'][:10]}</span></div>"
+        for i in pendientes
+    ) or "<p class=aviso>No hay invitaciones pendientes.</p>"
+
+    return _pagina(
+        "Administración",
+        f"<h1>Administración</h1>"
+        f"<p class=sub>Invita a quien quieras y controla quién tiene acceso.</p>"
+        f"{recien}"
+        f"<form method=post action='/admin/invitar'>"
+        f"<label for=email>Invitar a (email, opcional: solo para acordarte)</label>"
+        f"<input id=email name=email type=email placeholder='amigo@ejemplo.com'>"
+        f"<button type=submit>Crear invitación</button></form>"
+        f"<h2>Usuarios</h2><div class=rejilla>{''.join(filas)}</div>"
+        f"<h2>Invitaciones pendientes</h2><div class=rejilla>{lista_pendientes}</div>"
+        f"<form method=post action='/admin/salir'>"
+        f"<button type=submit style='background:transparent;color:var(--suave);"
+        f"border:1px solid var(--borde)'>Cerrar sesión</button></form>",
+        ancho=True,
+    )
+
+
+@router.post("/admin/entrar")
+def admin_entrar(request: Request, email: str = Form(...), password: str = Form(...)):
+    user_id = accounts.autenticar(email, password)
+    if not user_id or not store.es_admin(user_id):
+        # Mismo mensaje si la contraseña falla o si no es administrador: no hay
+        # que confirmarle a nadie que ha acertado con una credencial.
+        return panel(request, error="Credenciales incorrectas o sin permiso.")
+    respuesta = RedirectResponse("/admin", status_code=303)
+    _cookie_segura(respuesta, accounts.crear_sesion_admin(user_id))
+    return respuesta
+
+
+@router.post("/admin/invitar")
+def admin_invitar(request: Request, email: str = Form(default="")):
+    if not accounts.usuario_de_sesion(request.cookies.get(_COOKIE)):
+        return RedirectResponse("/admin", status_code=303)
+    codigo = accounts.crear_invitacion(email.strip() or None)
+    # El codigo viaja una vez en la URL para poder enseñarlo; despues solo queda
+    # su hash en la base y no hay forma de recuperarlo.
+    return RedirectResponse(f"/admin?nuevo={codigo}", status_code=303)
+
+
+@router.post("/admin/salir")
+def admin_salir(request: Request):
+    accounts.cerrar_sesion(request.cookies.get(_COOKIE))
+    respuesta = RedirectResponse("/admin", status_code=303)
+    respuesta.delete_cookie(_COOKIE, path="/")
+    return respuesta
 
 
 # ------------------------------------------------------------------ invitacion

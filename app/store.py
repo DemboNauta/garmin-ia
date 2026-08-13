@@ -25,6 +25,15 @@ CREATE TABLE IF NOT EXISTS users (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL;
 
+-- Sesiones del panel de administracion. Se guarda el hash de la cookie, no su
+-- valor, y viven en la base para poder revocarlas de verdad.
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at REAL NOT NULL
+);
+
 -- Invitaciones: el servicio es cerrado, solo entra quien reciba una.
 -- Se guarda el hash, no el codigo, para que una copia de la base no valga
 -- para darse de alta.
@@ -150,6 +159,11 @@ def init() -> None:
             _migrar_a_multiusuario(c)
         c.executescript(SCHEMA)
         _asegurar_columna(c, "users", "password_hash", "TEXT")
+        _asegurar_columna(c, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
+        # Una invitacion con user_id no crea cuenta: reclama una que ya existe,
+        # para que el dueño pueda ponerse email y contraseña sin teclearlos en
+        # una terminal ni pasarlos por ningun sitio.
+        _asegurar_columna(c, "invites", "user_id", "TEXT")
 
 
 @contextmanager
@@ -185,12 +199,23 @@ def existe_usuario(user_id: str) -> bool:
 def listar_usuarios() -> list[dict]:
     with conn() as c:
         rows = c.execute(
-            "SELECT u.user_id, u.email, u.created_at, "
+            "SELECT u.user_id, u.email, u.created_at, u.is_admin, "
             "       (s.user_id IS NOT NULL) AS garmin_vinculado "
             "FROM users u LEFT JOIN garmin_sessions s ON s.user_id = u.user_id "
             "ORDER BY u.created_at"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def es_admin(user_id: str) -> bool:
+    with conn() as c:
+        fila = c.execute("SELECT is_admin FROM users WHERE user_id=?", (user_id,)).fetchone()
+    return bool(fila and fila["is_admin"])
+
+
+def marcar_admin(user_id: str, admin: bool = True) -> None:
+    with conn() as c:
+        c.execute("UPDATE users SET is_admin=? WHERE user_id=?", (int(admin), user_id))
 
 
 def borrar_usuario(user_id: str) -> None:

@@ -1,6 +1,8 @@
 """Administracion desde la linea de comandos.
 
     python -m app.admin invitar [email]     emite una invitacion
+    python -m app.admin reclamar <user_id>  enlace para ponerle credenciales
+    python -m app.admin admin <user_id>     da acceso al panel /admin
     python -m app.admin usuarios            lista las cuentas
     python -m app.admin invitaciones        lista las invitaciones
     python -m app.admin borrar <user_id>    borra una cuenta y todos sus datos
@@ -23,6 +25,35 @@ def _invitar(email: str | None) -> int:
     print(f"  {settings.public_url}/invite/{codigo}\n")
     print("Caduca en 7 dias y solo sirve una vez.")
     print("El codigo no se puede volver a consultar: se guarda hasheado.")
+    return 0
+
+
+def _reclamar(user_id: str) -> int:
+    """Enlace de un solo uso para que una cuenta se ponga email y contrasena.
+
+    Existe porque la cuenta del dueno la creo la migracion a partir de datos
+    antiguos y no tiene credenciales: sin esto no podria entrar por la web ni
+    conectar desde claude.ai. La contrasena la elige la persona en el navegador,
+    asi no pasa por la terminal ni por ningun historial.
+    """
+    store.init()
+    if not store.existe_usuario(user_id):
+        print(f"No existe el usuario '{user_id}'.")
+        return 1
+    codigo = accounts.crear_invitacion(user_id=user_id)
+    print("Abre este enlace para poner email y contrasena a la cuenta:\n")
+    print(f"  {settings.public_url}/invite/{codigo}\n")
+    print("Caduca en 7 dias y solo sirve una vez.")
+    return 0
+
+
+def _hacer_admin(user_id: str) -> int:
+    store.init()
+    if not store.existe_usuario(user_id):
+        print(f"No existe el usuario '{user_id}'.")
+        return 1
+    store.marcar_admin(user_id)
+    print(f"'{user_id}' ya es administrador: puede entrar en {settings.public_url}/admin")
     return 0
 
 
@@ -69,6 +100,16 @@ def main(argv: list[str]) -> int:
     orden, *resto = argv
     if orden == "invitar":
         return _invitar(resto[0] if resto else None)
+    if orden == "reclamar":
+        if not resto:
+            print("Falta el user_id.")
+            return 1
+        return _reclamar(resto[0])
+    if orden == "admin":
+        if not resto:
+            print("Falta el user_id.")
+            return 1
+        return _hacer_admin(resto[0])
     if orden == "usuarios":
         return _usuarios()
     if orden == "invitaciones":
