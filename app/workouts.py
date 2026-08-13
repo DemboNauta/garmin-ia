@@ -6,9 +6,10 @@ Garmin los cambia, hay que tocar estas tablas y nada mas.
 """
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Union
 
 from garminconnect import exercises as _catalogo
+from pydantic import BaseModel, Discriminator, Field, Tag
 
 SPORTS: dict[str, tuple[int, str]] = {
     "running": (1, "running"),
@@ -215,6 +216,103 @@ def build(name: str, sport: str, steps: list[Step], description: str | None = No
             }
         ],
     }
+
+
+Deporte = Literal["running", "cycling", "swimming", "strength", "cardio", "walking", "hiit"]
+TipoPaso = Literal["warmup", "interval", "recovery", "rest", "cooldown", "other"]
+
+
+class Paso(BaseModel):
+    """Un paso suelto del entrenamiento."""
+
+    kind: TipoPaso = Field(
+        default="interval",
+        description="Papel del paso. Los descansos entre series van como 'rest'.",
+    )
+    exercise: str | None = Field(
+        default=None,
+        description=(
+            "OBLIGATORIO en ejercicios de fuerza. Nombre EXACTO del catalogo de "
+            "Garmin, que esta solo en ingles: busca antes con find_exercises "
+            "(p.ej. 'Barbell Bench Press'). De el sale el grupo muscular; sin "
+            "esto la sesion queda sin clasificar y describirlo en 'note' no "
+            "sirve de nada. No lo pongas en descansos ni en calentamientos."
+        ),
+    )
+    reps: int | None = Field(default=None, ge=1, description="Repeticiones. Usalo en fuerza.")
+    seconds: int | None = Field(default=None, ge=1, description="Duracion en segundos.")
+    meters: int | None = Field(default=None, ge=1, description="Distancia en metros.")
+    weight_kg: float | None = Field(
+        default=None, ge=0,
+        description="Carga en kilos. Sin esto no hay seguimiento de progresion de peso.",
+    )
+    hr_zone: int | None = Field(default=None, ge=1, le=5, description="Zona de frecuencia cardiaca.")
+    target_low: float | None = Field(default=None, description="Ritmo objetivo minimo, en m/s.")
+    target_high: float | None = Field(default=None, description="Ritmo objetivo maximo, en m/s.")
+    note: str | None = Field(
+        default=None,
+        description="Texto libre para matices (RIR, tecnica). NO uses esto para el ejercicio.",
+    )
+
+
+class Bloque(BaseModel):
+    """Serie de pasos repetida N veces."""
+
+    repeat: int = Field(ge=1, description="Cuantas vueltas se dan al bloque.")
+    steps: list[Elemento] = Field(description="Pasos que se repiten, en orden.")
+
+
+def _discriminar(valor: Any) -> str:
+    """Bloque si trae 'repeat', si no un paso suelto.
+
+    Sin esto la union prueba las dos ramas y un fallo tonto en un paso sale
+    sepultado bajo errores de 'Bloque' que no vienen a cuento, que es justo lo
+    que despista a un modelo cuando intenta corregirse.
+    """
+    if isinstance(valor, dict):
+        return "bloque" if "repeat" in valor else "paso"
+    return "bloque" if isinstance(valor, Bloque) else "paso"
+
+
+Elemento = Annotated[
+    Union[Annotated[Bloque, Tag("bloque")], Annotated[Paso, Tag("paso")]],
+    Discriminator(_discriminar),
+]
+
+
+class EntrenoSpec(BaseModel):
+    """Entrenamiento estructurado listo para Garmin Connect."""
+
+    name: str = Field(max_length=80, description="Nombre visible en Garmin Connect.")
+    sport: Deporte = Field(default="running", description="Deporte del entrenamiento.")
+    description: str | None = Field(default=None, description="Descripcion general de la sesion.")
+    steps: list[Elemento] = Field(
+        description="Pasos en orden. Un elemento con 'repeat' agrupa y repite los suyos.",
+    )
+
+
+Bloque.model_rebuild()
+EntrenoSpec.model_rebuild()
+
+
+def pasos_sin_ejercicio(spec: dict) -> list[str]:
+    """Pasos de trabajo que se guardarian sin ejercicio identificado.
+
+    No bloquea (hay sesiones legitimas sin ejercicio concreto, tipo AMRAP), pero
+    quien llame se entera de que va a perder el grupo muscular.
+    """
+    avisos: list[str] = []
+
+    def recorrer(items: list[dict]) -> None:
+        for it in items:
+            if "repeat" in it:
+                recorrer(it.get("steps") or [])
+            elif it.get("kind") in ("interval", "other") and not it.get("exercise"):
+                avisos.append(it.get("note") or f"paso '{it.get('kind')}' sin ejercicio")
+
+    if spec.get("sport") == "strength":
+        recorrer(spec.get("steps") or [])
+    return avisos
 
 
 def from_spec(spec: dict) -> dict:

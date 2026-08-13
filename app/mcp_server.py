@@ -12,9 +12,33 @@ from mcp.server.fastmcp import FastMCP
 from . import store, sync, workouts
 from .garmin_client import client
 
+INSTRUCCIONES = """\
+Datos de Garmin Connect de un unico usuario, y escritura de entrenamientos.
+
+Antes de proponer una sesion, mira get_today: readiness, sueño y HRV mandan
+sobre cualquier plan previo.
+
+Para crear fuerza, el orden es: find_exercises para dar con el nombre exacto
+(el catalogo esta SOLO en ingles) y luego create_workout con ese nombre en
+`exercise`. Un ejercicio sin identificar pierde el grupo muscular y la sesion
+deja de ser analizable despues; describirlo en `note` no lo arregla.
+
+Para editar, get_workout devuelve los pasos con la misma forma que espera
+create_workout: cambia lo que haga falta y pasalos a update_workout. Eso
+reemplaza el entrenamiento entero, asi que mandalo completo. El id se conserva,
+de modo que editar no lo saca del calendario; mover la fecha es unschedule_workout
+mas schedule_workout, con el schedule_id de list_scheduled, que no es el id del
+entrenamiento.
+
+Los datos vienen de la nube de Garmin, no del dispositivo, y se cachean: usa
+refresh solo si necesitas el dato del momento.\
+"""
+
 # streamable_http_path="/" porque main.py ya monta esta app bajo /mcp:
 # con el valor por defecto ("/mcp") el endpoint acabaria en /mcp/mcp.
-mcp = FastMCP("garmin", stateless_http=True, streamable_http_path="/")
+mcp = FastMCP(
+    "garmin", stateless_http=True, streamable_http_path="/", instructions=INSTRUCCIONES
+)
 
 
 @mcp.tool()
@@ -105,38 +129,37 @@ def list_muscle_groups() -> list[str]:
 
 
 @mcp.tool()
-def create_workout(spec: dict, schedule_date: str | None = None) -> dict:
+def create_workout(
+    spec: workouts.EntrenoSpec, schedule_date: str | None = None
+) -> dict:
     """Crea un entrenamiento estructurado en Garmin Connect y opcionalmente lo
     programa en una fecha (YYYY-MM-DD).
 
-    Formato de spec:
-    {"name": str, "sport": "running|cycling|cardio|strength|walking|hiit|swimming",
-     "description": str,
-     "steps": [{"kind": "warmup|interval|recovery|rest|cooldown|other",
-                "seconds": int, "meters": int, "hr_zone": 1-5, "note": str,
-                "exercise": str, "reps": int, "weight_kg": float},
-               {"repeat": 4, "steps": [...]}]}
+    En fuerza, cada ejercicio necesita `exercise` con el nombre exacto del
+    catalogo: buscalo antes con find_exercises. Los descansos entre series van
+    como pasos aparte con kind='rest' y `seconds`.
 
-    En sesiones de fuerza usa SIEMPRE `exercise` con el nombre exacto del
-    catalogo (buscalo antes con find_exercises) junto a `reps` y, si procede,
-    `weight_kg`. Sin `exercise` el ejercicio queda sin identificar y Garmin
-    pierde el grupo muscular: describirlo en `note` no sirve, porque las notas
-    son texto libre que no se puede agregar despues.
-
-    Ejemplo de fuerza:
+    Ejemplo:
     {"name": "Empuje A", "sport": "strength", "steps": [
         {"repeat": 4, "steps": [
             {"kind": "interval", "exercise": "Barbell Bench Press",
              "reps": 8, "weight_kg": 40},
             {"kind": "rest", "seconds": 120}]}]}
     """
-    payload = workouts.from_spec(spec)
+    datos = spec.model_dump(exclude_none=True)
+    payload = workouts.from_spec(datos)
     created = client.create_workout(payload)
     result = {"workout_id": created.get("workoutId"), "name": created.get("workoutName")}
     if schedule_date:
         day = dt.date.fromisoformat(schedule_date)
         client.schedule_workout(created["workoutId"], day)
         result["scheduled_for"] = schedule_date
+    avisos = workouts.pasos_sin_ejercicio(datos)
+    if avisos:
+        result["warnings"] = (
+            [f"{len(avisos)} pasos de fuerza sin `exercise`: no tendran grupo muscular."]
+            + avisos[:5]
+        )
     return result
 
 
@@ -225,18 +248,29 @@ def get_workout(workout_id: int, raw: bool = False) -> dict:
 
 
 @mcp.tool()
-def update_workout(workout_id: int, spec: dict) -> dict:
-    """Reemplaza un entrenamiento existente. `spec` tiene el mismo formato que
-    create_workout y debe ir COMPLETO: Garmin no admite parches, el PUT
-    sustituye toda la estructura, asi que lo que no mandes se pierde.
+def update_workout(workout_id: int, spec: workouts.EntrenoSpec) -> dict:
+    """Reemplaza un entrenamiento existente. Lee antes con get_workout: sus
+    `steps` ya vienen con este mismo formato, asi que basta con cambiar lo que
+    haga falta y devolverlos aqui.
+
+    El spec debe ir COMPLETO: Garmin no admite parches, el PUT sustituye toda la
+    estructura, asi que lo que no mandes se pierde.
 
     El entrenamiento conserva su id, de modo que si estaba programado en el
     calendario sigue estandolo: editar el contenido NO obliga a reprogramar.
     Para mover la fecha se usan unschedule_workout y schedule_workout.
     """
-    payload = workouts.from_spec(spec)
+    datos = spec.model_dump(exclude_none=True)
+    payload = workouts.from_spec(datos)
     updated = client.update_workout(workout_id, payload)
-    return {"workout_id": workout_id, "updated": True, "name": (updated or {}).get("workoutName")}
+    result = {"workout_id": workout_id, "updated": True, "name": (updated or {}).get("workoutName")}
+    avisos = workouts.pasos_sin_ejercicio(datos)
+    if avisos:
+        result["warnings"] = (
+            [f"{len(avisos)} pasos de fuerza sin `exercise`: no tendran grupo muscular."]
+            + avisos[:5]
+        )
+    return result
 
 
 @mcp.tool()
