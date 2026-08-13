@@ -10,7 +10,7 @@ import datetime as dt
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import store, sync, workouts
+from . import profile, store, sync, workouts
 from .config import settings
 from .garmin_client import para_usuario
 from .identity import usuario_actual
@@ -20,8 +20,12 @@ Datos de Garmin Connect de quien te esta hablando, y escritura de entrenamientos
 en su cuenta. Cada credencial ve solo lo suyo: no hay forma de consultar los
 datos de otra persona, ni falta.
 
-Antes de proponer una sesion, mira get_today: readiness, sueño y HRV mandan
-sobre cualquier plan previo.
+Antes de proponer una sesion, mira DOS cosas: get_profile, que dice con que
+material cuenta, cuantos dias entrena y que lesiones respetar, y get_today, cuyo
+readiness, sueño y HRV mandan sobre cualquier plan previo.
+
+Cuando cuente algo estable de su forma de entrenar, guardalo con
+update_profile en vez de fiarlo a la memoria de la conversacion, que se pierde.
 
 Para crear fuerza, el orden es: find_exercises para dar con el nombre exacto
 (el catalogo esta SOLO en ingles) y luego create_workout con ese nombre en
@@ -139,6 +143,38 @@ def get_activities(days: int = 30) -> list[dict]:
         }
         for a in acts
     ]
+
+
+@mcp.tool()
+def get_profile() -> dict:
+    """Preferencias de entrenamiento de esta persona: material disponible, como
+    reparte la fuerza, cuantos dias entrena, actividades habituales, objetivos y
+    lesiones.
+
+    Miralo ANTES de proponer nada. Garmin dice como esta, esto dice con que
+    cuenta: prescribir sentadilla con barra a quien solo tiene gomas no sirve.
+    Devuelve {} si aun no ha contado nada; entonces pregunta y guardalo.
+    """
+    return profile.leer(usuario_actual())
+
+
+@mcp.tool()
+def update_profile(perfil: profile.Perfil) -> dict:
+    """Guarda o corrige preferencias de entrenamiento. Devuelve el perfil entero
+    ya actualizado.
+
+    Solo toca los campos que mandes: lo demas se queda como estaba. Es lo
+    contrario que update_workout, y a proposito, porque un perfil se completa a
+    lo largo de muchas conversaciones y no conviene que mencionar el material
+    borre las lesiones.
+
+    Manda un campo explicitamente a null para borrarlo.
+
+    Usalo cuando la persona cuente algo estable ("me he comprado una bici",
+    "ahora entreno 4 dias", "me duele el hombro derecho"), no para cosas de un
+    dia suelto.
+    """
+    return profile.actualizar(usuario_actual(), perfil)
 
 
 @mcp.tool()

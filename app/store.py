@@ -79,6 +79,14 @@ CREATE TABLE IF NOT EXISTS garmin_sessions (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
+-- Preferencias de entrenamiento: material, reparto, lesiones. Lo que Garmin no
+-- sabe y el modelo necesita para no proponer a ciegas.
+CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id    TEXT PRIMARY KEY,
+    payload    TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS daily (
     user_id    TEXT NOT NULL,
     day        TEXT NOT NULL,
@@ -221,7 +229,7 @@ def marcar_admin(user_id: str, admin: bool = True) -> None:
 def borrar_usuario(user_id: str) -> None:
     """Elimina al usuario y todo lo suyo. Sin esto no hay derecho de supresion."""
     with conn() as c:
-        for tabla in ("daily", "activities", "garmin_sessions", "users"):
+        for tabla in ("daily", "activities", "garmin_sessions", "user_profiles", "users"):
             c.execute(f"DELETE FROM {tabla} WHERE user_id=?", (user_id,))
 
 
