@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from garminconnect import exercises as _catalogo
+
 SPORTS: dict[str, tuple[int, str]] = {
     "running": (1, "running"),
     "cycling": (2, "cycling"),
@@ -33,7 +35,11 @@ END_CONDITIONS: dict[str, tuple[int, str]] = {
     "time": (2, "time"),          # segundos
     "distance": (3, "distance"),  # metros
     "iterations": (7, "iterations"),
+    "reps": (10, "reps"),         # repeticiones (fuerza)
 }
+
+# Garmin guarda el peso en GRAMOS pero etiquetado como kilogramo.
+WEIGHT_UNIT_KG: dict[str, Any] = {"unitId": 8, "unitKey": "kilogram", "factor": 1000.0}
 
 TARGETS: dict[str, tuple[int, str]] = {
     "none": (1, "no.target"),
@@ -46,18 +52,67 @@ TARGETS: dict[str, tuple[int, str]] = {
 Step = dict[str, Any]
 
 
+class EjercicioDesconocido(ValueError):
+    """El nombre no esta en el catalogo de Garmin."""
+
+
+def buscar_ejercicios(termino: str) -> list[dict[str, str]]:
+    """Ejercicios cuyo nombre contiene `termino`. El catalogo esta en ingles."""
+    return _catalogo.find(termino)
+
+
+def categorias() -> list[str]:
+    """Las 47 categorias de Garmin: son los grupos musculares / patrones."""
+    return list(_catalogo.CATEGORIES)
+
+
+def resolver_ejercicio(nombre: str) -> dict[str, str]:
+    """Nombre visible -> entrada del catalogo (categoria + variante).
+
+    Falla en vez de tragarse el nombre: si el paso se manda sin `category`,
+    Garmin lo guarda como ejercicio generico y se pierde el grupo muscular,
+    que es justo el dato que interesa conservar.
+    """
+    entrada = _catalogo.resolve(nombre)
+    if entrada:
+        return entrada
+    candidatos = buscar_ejercicios(nombre)
+    if len(candidatos) == 1:  # coincidencia parcial inequivoca
+        return candidatos[0]
+    if candidatos:
+        nombres = ", ".join(e["name"] for e in candidatos[:8])
+        raise EjercicioDesconocido(
+            f"'{nombre}' no es exacto. Candidatos: {nombres}"
+        )
+    raise EjercicioDesconocido(
+        f"'{nombre}' no esta en el catalogo de Garmin (esta en ingles). "
+        "Usa la herramienta find_exercises para dar con el nombre exacto."
+    )
+
+
 def step(
     kind: Literal["warmup", "interval", "recovery", "rest", "cooldown", "other"],
     *,
     seconds: int | None = None,
     meters: int | None = None,
+    reps: int | None = None,
+    exercise: str | None = None,
+    weight_kg: float | None = None,
     hr_zone: int | None = None,
     target_low: float | None = None,
     target_high: float | None = None,
     note: str | None = None,
 ) -> Step:
-    """Un paso suelto. Usa `seconds` o `meters`; si no, termina con boton de vuelta."""
-    if seconds is not None:
+    """Un paso suelto.
+
+    Usa `seconds`, `meters` o `reps`; si no, termina con boton de vuelta.
+    En fuerza, `exercise` es el nombre visible del catalogo (ver
+    `buscar_ejercicios`): de el salen la categoria (grupo muscular) y la
+    variante que Garmin necesita para no guardarlo como ejercicio suelto.
+    """
+    if reps is not None:
+        cond, value = END_CONDITIONS["reps"], float(reps)
+    elif seconds is not None:
         cond, value = END_CONDITIONS["time"], float(seconds)
     elif meters is not None:
         cond, value = END_CONDITIONS["distance"], float(meters)
@@ -71,7 +126,7 @@ def step(
     else:
         target, zone = TARGETS["none"], None
 
-    return {
+    paso: Step = {
         "_kind": kind,
         "type": "ExecutableStepDTO",
         "stepType": {"stepTypeId": STEP_TYPES[kind][0], "stepTypeKey": STEP_TYPES[kind][1]},
@@ -83,6 +138,17 @@ def step(
         "zoneNumber": zone,
         "description": note,
     }
+
+    if exercise is not None:
+        entrada = resolver_ejercicio(exercise)
+        paso["category"] = entrada["category"]      # el grupo muscular
+        paso["exerciseName"] = entrada["exercise"]  # la variante concreta
+
+    if weight_kg is not None:
+        paso["weightValue"] = float(weight_kg) * 1000.0  # Garmin lo quiere en gramos
+        paso["weightUnit"] = dict(WEIGHT_UNIT_KG)
+
+    return paso
 
 
 def repeat(times: int, steps: list[Step]) -> Step:

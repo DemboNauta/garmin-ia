@@ -84,6 +84,27 @@ def get_activities(days: int = 30) -> list[dict]:
 
 
 @mcp.tool()
+def find_exercises(term: str, limit: int = 25) -> list[dict]:
+    """Busca en el catalogo de ejercicios de fuerza de Garmin (1527 en total).
+
+    Devuelve el nombre exacto que espera create_workout y su `category`, que es
+    el grupo muscular con el que Garmin clasifica la sesion. El catalogo esta
+    SOLO en ingles: busca "bench press", no "press de banca".
+    """
+    return [
+        {"name": e["name"], "muscle_group": e["category"], "variant": e["exercise"]}
+        for e in workouts.buscar_ejercicios(term)[:limit]
+    ]
+
+
+@mcp.tool()
+def list_muscle_groups() -> list[str]:
+    """Las 47 categorias de Garmin, que son los grupos musculares y patrones
+    de movimiento con los que clasifica los ejercicios de fuerza."""
+    return workouts.categorias()
+
+
+@mcp.tool()
 def create_workout(spec: dict, schedule_date: str | None = None) -> dict:
     """Crea un entrenamiento estructurado en Garmin Connect y opcionalmente lo
     programa en una fecha (YYYY-MM-DD).
@@ -92,8 +113,22 @@ def create_workout(spec: dict, schedule_date: str | None = None) -> dict:
     {"name": str, "sport": "running|cycling|cardio|strength|walking|hiit|swimming",
      "description": str,
      "steps": [{"kind": "warmup|interval|recovery|rest|cooldown|other",
-                "seconds": int, "meters": int, "hr_zone": 1-5, "note": str},
+                "seconds": int, "meters": int, "hr_zone": 1-5, "note": str,
+                "exercise": str, "reps": int, "weight_kg": float},
                {"repeat": 4, "steps": [...]}]}
+
+    En sesiones de fuerza usa SIEMPRE `exercise` con el nombre exacto del
+    catalogo (buscalo antes con find_exercises) junto a `reps` y, si procede,
+    `weight_kg`. Sin `exercise` el ejercicio queda sin identificar y Garmin
+    pierde el grupo muscular: describirlo en `note` no sirve, porque las notas
+    son texto libre que no se puede agregar despues.
+
+    Ejemplo de fuerza:
+    {"name": "Empuje A", "sport": "strength", "steps": [
+        {"repeat": 4, "steps": [
+            {"kind": "interval", "exercise": "Barbell Bench Press",
+             "reps": 8, "weight_kg": 40},
+            {"kind": "rest", "seconds": 120}]}]}
     """
     payload = workouts.from_spec(spec)
     created = client.create_workout(payload)
