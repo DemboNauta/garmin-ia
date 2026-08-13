@@ -1,0 +1,15 @@
+# Credenciales reales — NUNCA subir
+.env
+
+# Datos y tokens OAuth de Garmin
+data/
+*.db
+garmin_tokens*
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+.idea/
+.vscode/
