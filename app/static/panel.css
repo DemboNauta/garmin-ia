@@ -535,20 +535,22 @@
   .nav-principal .pestana {
     flex: 1 1 0;
     min-width: 0;
-    padding: .55rem .1rem;
+    padding: .6rem .1rem;
     /* Seis pestañas tienen que caber en 390 px sin cortarse: la mas larga
        ("Tendencias") manda sobre el tamaño y sobre el espaciado. */
     font-size: 9px;
     letter-spacing: .01em;
-    border-radius: 9px;
+    border-radius: 999px;
     overflow: hidden;
     text-overflow: ellipsis;
+    transition: color .15s, background .15s;
   }
-  /* Abajo el pildorazo blanco pesa demasiado: basta con el color y una marca. */
+  /* La activa, en monocromo: texto blanco sobre una pildora apenas insinuada.
+     Ni subrayados ni color de acento, que aqui abajo pesan demasiado. */
   .nav-principal .pestana.activa {
-    color: var(--verde);
-    background: transparent;
-    box-shadow: inset 0 2px 0 var(--verde);
+    color: var(--texto);
+    background: rgba(255, 255, 255, .08);
+    box-shadow: none;
   }
 
   /* Sitio para la barra: sin esto la ultima tarjeta queda debajo. */
