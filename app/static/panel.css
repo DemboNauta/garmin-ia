@@ -255,33 +255,61 @@
 .tipo.andar  { color: var(--verde); background: color-mix(in srgb, var(--verde) 12%, transparent); }
 
 /* ----------------------------------------------------------------- analisis */
-.insight {
-  position: relative;
-  padding: 1.3rem 1.4rem;
-  margin-bottom: 1rem;
+/* Una lista continua con separadores de un pelo, no tarjetas sueltas: el tipo
+   de analisis lo dice un punto de color y nada mas. La jerarquia la ponen el
+   titulo y los numeros, no los bordes. */
+.insights-lista {
   background: var(--carbon);
   border: 1px solid var(--linea);
-  border-left: 3px solid var(--linea-fuerte);
   border-radius: var(--radio);
+  overflow: hidden;
+  box-shadow: var(--sombra);
 }
-.insight.lectura  { border-left-color: var(--azul); }
-.insight.plan     { border-left-color: var(--verde); }
-.insight.progreso { border-left-color: var(--violeta); }
-.insight.aviso    { border-left-color: var(--amarillo); }
+.insight { position: relative; padding: 1.25rem 1.4rem; }
+.insight + .insight { border-top: 1px solid var(--linea); }
 
-.insight .meta { display: flex; align-items: center; gap: .7rem; margin-bottom: .5rem; }
-.insight .clase { font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
-.insight.lectura  .clase { color: var(--azul); }
-.insight.plan     .clase { color: var(--verde); }
-.insight.progreso .clase { color: var(--violeta); }
-.insight.aviso    .clase { color: var(--amarillo); }
-.insight .cuando { font-size: .74rem; color: var(--apagado); }
-.insight h3 { margin: 0 0 .5rem; font-size: 1.08rem; letter-spacing: -.02em; }
-.insight p { margin: 0; color: var(--tenue); font-size: .92rem; white-space: pre-wrap; }
-.insight .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .9rem; }
+.insight .meta { display: flex; align-items: center; gap: .55rem; margin-bottom: .6rem; }
+.punto-insight {
+  width: .4rem;
+  height: .4rem;
+  border-radius: 50%;
+  flex: none;
+  background: var(--linea-fuerte);
+}
+.insight.lectura  .punto-insight { background: var(--azul); }
+.insight.plan     .punto-insight { background: var(--verde); }
+.insight.progreso .punto-insight { background: var(--violeta); }
+.insight.aviso    .punto-insight { background: var(--amarillo); }
+.insight .clase {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--tenue);
+}
+/* La fecha se va a la derecha: deja la fila de arriba limpia y el ojo entra
+   directo al titulo. */
+.insight .cuando { font-size: .72rem; color: var(--apagado); margin-left: auto; text-align: right; }
+.insight h3 { margin: 0 0 .35rem; font-size: 1rem; font-weight: 650; letter-spacing: -.01em; }
+.insight p { margin: 0; color: var(--tenue); font-size: .88rem; line-height: 1.6; white-space: pre-wrap; }
+
+/* Los numeros del analisis como pares etiqueta/valor: la version en miniatura
+   de las baldosas de metricas, sin caja y sin monospace. */
+.datos-insight { display: flex; flex-wrap: wrap; gap: .5rem 1.8rem; margin-top: 1rem; }
+.dato-insight b {
+  display: block;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--apagado);
+  margin-bottom: .1rem;
+}
+.dato-insight span { font-size: .95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
 /* En la portada el analisis se enseña recortado: es un vistazo, y tres textos
    largos empujarian las metricas del dia fuera de la pantalla. */
-.insight.resumido { padding: 1.1rem 1.2rem; margin-bottom: .7rem; }
+.insight.resumido { padding: 1.05rem 1.2rem; }
 .insight.resumido p {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -291,25 +319,24 @@
      se corta a la mitad de lo que cabe. En el resumen no hacen falta. */
   white-space: normal;
 }
-.insight.resumido .chips { margin-top: .7rem; }
-#destacados > .fantasma { margin-top: .25rem; }
+.insight.resumido .datos-insight { margin-top: .7rem; }
+#destacados > .fantasma { margin-top: .8rem; }
+/* Va en linea al final de la fila de meta, detras de la fecha: asi nunca se
+   monta encima de nada y aparece solo cuando el cursor esta en la tarjeta. */
 .insight .borrar {
-  position: absolute;
-  top: .9rem;
-  right: .9rem;
   width: auto;
   margin: 0;
-  padding: .2rem .5rem;
-  font-size: .7rem;
+  padding: 0 0 0 .5rem;
+  font-size: .68rem;
+  font-weight: 600;
   color: var(--apagado);
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  border: 0;
   opacity: 0;
-  transition: opacity .15s;
+  transition: opacity .15s, color .15s;
 }
 .insight:hover .borrar { opacity: 1; }
-.insight .borrar:hover { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 40%, transparent); filter: none; }
+.insight .borrar:hover { color: var(--rojo); filter: none; }
 
 .chip {
   font-family: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, monospace;

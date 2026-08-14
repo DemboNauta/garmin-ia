@@ -351,8 +351,9 @@ async function pintarDestacados(seccion) {
   try {
     const { insights: lista } = await pedirCache(`${API}/insights?limite=3`);
     caja.innerHTML = lista.length
-      ? lista.map((i) => tarjetaInsight(i, { resumido: true })).join("")
-        + `<button class=fantasma data-ir=analisis>Ver todos los análisis</button>`
+      ? `<div class=insights-lista>${
+          lista.map((i) => tarjetaInsight(i, { resumido: true })).join("")
+        }</div><button class=fantasma data-ir=analisis>Ver todos los análisis</button>`
       : `<div class="tarjeta-panel">
           <p style="margin:0;color:var(--tenue);font-size:.92rem">Tu asistente todavía
           no ha dejado nada por escrito. Pídeselo en la conversación —«mira cómo he
@@ -761,17 +762,23 @@ async function pintarCuerpo(seccion, dias = 90) {
    recorta el cuerpo a unas lineas y quita el boton de borrar, porque esa
    pantalla es un vistazo y no el sitio donde se gestiona nada. */
 function tarjetaInsight(i, { resumido = false } = {}) {
-  const chips = Object.entries(i.metrics || {}).map(([k, v]) =>
-    `<span class=chip><b>${esc(k)}</b> ${esc(v)}</span>`).join("");
+  // Las claves las escribe el modelo en snake_case ('sueño_h'); aqui se
+  // enseñan como etiquetas, no como codigo: sin guiones, sin monospace.
+  const datos = Object.entries(i.metrics || {}).map(([k, v]) =>
+    `<span class=dato-insight><b>${esc(k.replaceAll("_", " "))}</b>` +
+    `<span>${esc(typeof v === "number"
+      ? v.toLocaleString("es-ES", { maximumFractionDigits: 2 }) : v)}</span></span>`
+  ).join("");
   return `<article class="insight ${esc(i.kind)}${resumido ? " resumido" : ""}"
                    data-id="${esc(i.insight_id)}">
-    ${resumido ? "" : `<button class=borrar title="Quitar del panel">Borrar</button>`}
-    <div class=meta><span class=clase>${esc(i.label || i.kind)}</span>
+    <div class=meta><span class=punto-insight></span>
+      <span class=clase>${esc(i.label || i.kind)}</span>
       <span class=cuando>${esc(haceCuanto(i.created_at))}
-      ${i.period_days ? ` · mirando ${i.period_days} días` : ""}</span></div>
+      ${i.period_days ? ` · ${i.period_days} días` : ""}</span>
+      ${resumido ? "" : `<button class=borrar title="Quitar del panel">Borrar</button>`}</div>
     <h3>${esc(i.title)}</h3>
     <p>${esc(i.body)}</p>
-    ${chips ? `<div class=chips>${chips}</div>` : ""}
+    ${datos ? `<div class=datos-insight>${datos}</div>` : ""}
   </article>`;
 }
 
@@ -779,7 +786,9 @@ async function pintarAnalisis(seccion) {
   seccion.innerHTML = `<div class=esqueleto></div>`;
   const datos = await pedirCache(`${API}/insights?limite=50`);
   const lista = datos.insights || [];
-  const tarjetas = lista.map((i) => tarjetaInsight(i)).join("");
+  const tarjetas = `<div class=insights-lista>${
+    lista.map((i) => tarjetaInsight(i)).join("")
+  }</div>`;
 
   seccion.innerHTML = `
     <div class=encabezado><div><h1>Análisis</h1>
@@ -798,7 +807,11 @@ async function pintarAnalisis(seccion) {
       // se pide con otro limite y seguiria enseñando lo que se acaba de borrar.
       [...cache.keys()].filter((k) => k.includes("/insights")).forEach((k) => cache.delete(k));
       APP.pintadas.delete("hoy");
+      const lista = tarjeta.parentElement;
       tarjeta.remove();
+      // Si era el ultimo, se repinta entero: una caja con borde y nada dentro
+      // parece un fallo, y el estado vacio ya explica que hacer.
+      if (lista && !lista.querySelector(".insight")) pintarAnalisis(seccion);
       avisar("Análisis borrado.");
     } catch (e) { avisar(e.message, true); }
   }));
