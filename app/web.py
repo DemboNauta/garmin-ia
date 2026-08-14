@@ -35,6 +35,14 @@ def _cabeza(titulo: str, *hojas: str) -> str:
         f"<!doctype html><html lang=es><meta charset=utf-8>"
         f"<meta name=viewport content='width=device-width,initial-scale=1,viewport-fit=cover'>"
         f"<meta name=color-scheme content=dark>"
+        # El manifest es lo que convierte "añadir a pantalla de inicio" en una
+        # app de verdad: icono propio, sin barra del navegador y arrancando en
+        # /panel. El scope va explicito porque el fichero vive en /static/ y su
+        # ambito por defecto seria solo ese directorio.
+        f"<link rel=manifest href='/static/manifest.webmanifest'>"
+        f"<meta name=theme-color content='#08080a'>"
+        f"<link rel=icon type=image/png href='/static/icono-192.png'>"
+        f"<link rel=apple-touch-icon href='/static/icono-180.png'>"
         f"<title>{html.escape(titulo)}</title>{enlaces}"
     )
 
@@ -102,7 +110,14 @@ def poner_cookie(respuesta, token: str) -> None:
         token,
         httponly=True,                                   # fuera del alcance de JS
         secure=settings.public_url.startswith("https"),  # solo por TLS
-        samesite="strict",                               # corta el CSRF entre sitios
+        # Lax y no Strict, y no es un descuido. Con Strict, Chrome no manda la
+        # cookie cuando la navegacion la inicia algo que no es el navegador: al
+        # abrir el panel desde el acceso directo de la pantalla de inicio pedia
+        # iniciar sesion siempre, porque el lanzador de Android cuenta como
+        # origen externo. Lax solo afloja las navegaciones GET de primer nivel;
+        # todo lo que cambia estado aqui (login, salir, desvincular, sync,
+        # borrar analisis) es POST o DELETE, y ahi Lax sigue sin mandarla.
+        samesite="lax",
         max_age=30 * 24 * 3600,
         path="/",
     )

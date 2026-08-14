@@ -20,7 +20,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from . import accounts, garmin_client, insights, profile, scales, store, sync, weight
+from . import accounts, garmin_client, insights, muscles, profile, scales, store, sync, weight
 from .config import settings
 from .web import COOKIE, pagina_panel
 
@@ -202,6 +202,23 @@ def api_cuerpo(dias: int = 90, usuario: str = Depends(usuario_web)) -> dict:
         log.warning("Fallo leyendo pesajes de Garmin de %s: %s", usuario, exc)
         fuera["garmin"] = {"error": str(exc)[:200]}
     return fuera
+
+
+# --------------------------------------------------------------- api: musculos
+@router.get("/panel/api/musculos")
+def api_musculos(dias: int = 30, usuario: str = Depends(usuario_web)) -> dict:
+    """Series por grupo muscular en el periodo, para pintar el cuerpo.
+
+    Sale de summarizedExerciseSets, que ya viene en la cache de actividades:
+    no cuesta llamadas extra a Garmin mas alla de asegurar el rango.
+    """
+    dias = _dias(dias, 30)
+    fin = sync.today()
+    inicio = fin - dt.timedelta(days=dias - 1)
+    try:
+        return {"garmin_linked": True, "days": dias, **muscles.resumen(usuario, inicio, fin)}
+    except garmin_client.GarminAuthError as exc:
+        return {"garmin_linked": False, "note": str(exc)}
 
 
 # --------------------------------------------------------------- api: insights

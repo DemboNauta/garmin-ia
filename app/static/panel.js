@@ -485,6 +485,118 @@ async function pintarSesiones(seccion, dias = 30) {
 }
 
 /* =================================================================== CUERPO */
+/* El mapa muscular. Dos figuras esquematicas (frente y espalda) dibujadas a
+   mano en SVG: cada region es una forma con data-region, y el color lo pone
+   pintarMusculos segun las series del periodo. No es anatomia, es un mapa de
+   calor con forma de persona: lo que importa es ver de un vistazo que llevas
+   dos semanas sin tocar pierna. */
+const SILUETA = `
+  <circle cx=60 cy=15 r=9.5 class=silueta></circle>
+  <rect x=54 y=24 width=12 height=9 rx=4 class=silueta></rect>
+  <rect x=38 y=31 width=44 height=80 rx=15 class=silueta></rect>
+  <rect x=25 y=40 width=13 height=68 rx=6.5 class=silueta></rect>
+  <rect x=82 y=40 width=13 height=68 rx=6.5 class=silueta></rect>
+  <rect x=42 y=108 width=17 height=92 rx=8 class=silueta></rect>
+  <rect x=61 y=108 width=17 height=92 rx=8 class=silueta></rect>`;
+
+function _el(region, forma) {
+  return forma.replace(
+    /^<(ellipse|rect|path|polygon)/,
+    `<$1 class=musculo data-region="${region}"`,
+  );
+}
+
+const CUERPO_FRENTE = [
+  ["hombros",    "<ellipse cx=35 cy=44 rx=8 ry=6.5></ellipse>"],
+  ["hombros",    "<ellipse cx=85 cy=44 rx=8 ry=6.5></ellipse>"],
+  ["pecho",      "<ellipse cx=51 cy=57 rx=9.5 ry=8></ellipse>"],
+  ["pecho",      "<ellipse cx=69 cy=57 rx=9.5 ry=8></ellipse>"],
+  ["biceps",     "<ellipse cx=31.5 cy=64 rx=5.5 ry=10></ellipse>"],
+  ["biceps",     "<ellipse cx=88.5 cy=64 rx=5.5 ry=10></ellipse>"],
+  ["antebrazos", "<ellipse cx=30 cy=92 rx=4.5 ry=13></ellipse>"],
+  ["antebrazos", "<ellipse cx=90 cy=92 rx=4.5 ry=13></ellipse>"],
+  ["abdomen",    "<rect x=53 y=68 width=14 height=35 rx=6></rect>"],
+  ["oblicuos",   "<ellipse cx=46 cy=85 rx=4 ry=14></ellipse>"],
+  ["oblicuos",   "<ellipse cx=74 cy=85 rx=4 ry=14></ellipse>"],
+  ["cuadriceps", "<ellipse cx=50.5 cy=140 rx=8 ry=25></ellipse>"],
+  ["cuadriceps", "<ellipse cx=69.5 cy=140 rx=8 ry=25></ellipse>"],
+];
+
+const CUERPO_ESPALDA = [
+  ["trapecios",  "<path d='M60,31 L44,47 Q60,55 76,47 Z'></path>"],
+  ["hombros",    "<ellipse cx=35 cy=44 rx=8 ry=6.5></ellipse>"],
+  ["hombros",    "<ellipse cx=85 cy=44 rx=8 ry=6.5></ellipse>"],
+  ["espalda",    "<ellipse cx=51 cy=68 rx=8.5 ry=16></ellipse>"],
+  ["espalda",    "<ellipse cx=69 cy=68 rx=8.5 ry=16></ellipse>"],
+  ["lumbar",     "<rect x=53 y=86 width=14 height=17 rx=5></rect>"],
+  ["triceps",    "<ellipse cx=31.5 cy=66 rx=5.5 ry=10.5></ellipse>"],
+  ["triceps",    "<ellipse cx=88.5 cy=66 rx=5.5 ry=10.5></ellipse>"],
+  ["antebrazos", "<ellipse cx=30 cy=92 rx=4.5 ry=13></ellipse>"],
+  ["antebrazos", "<ellipse cx=90 cy=92 rx=4.5 ry=13></ellipse>"],
+  ["gluteos",    "<ellipse cx=51.5 cy=113 rx=8.5 ry=9.5></ellipse>"],
+  ["gluteos",    "<ellipse cx=68.5 cy=113 rx=8.5 ry=9.5></ellipse>"],
+  ["isquios",    "<ellipse cx=50.5 cy=146 rx=7.5 ry=22></ellipse>"],
+  ["isquios",    "<ellipse cx=69.5 cy=146 rx=7.5 ry=22></ellipse>"],
+  ["gemelos",    "<ellipse cx=50 cy=182 rx=6 ry=13></ellipse>"],
+  ["gemelos",    "<ellipse cx=70 cy=182 rx=6 ry=13></ellipse>"],
+];
+
+function figura(formas, titulo, valores, etiquetas, tope) {
+  const cuerpo = formas.map(([region, forma]) => {
+    const series = valores[region] || 0;
+    // Escala con suelo: una region tocada una vez tiene que distinguirse de
+    // una sin tocar, aunque el maximo sea alto.
+    const t = tope ? Math.sqrt(series / tope) : 0;
+    const relleno = series
+      ? `color-mix(in srgb, var(--verde) ${Math.round(18 + 72 * t)}%, var(--carbon-alto))`
+      : "rgba(255,255,255,.055)";
+    const con = _el(region, forma).replace(
+      ">",
+      ` style="fill:${relleno}"><title>${esc(etiquetas[region] || region)}: ` +
+      `${NUM(series, series % 1 ? 1 : 0)} series</title>`,
+    );
+    return con;
+  }).join("");
+  return `<div class=cuerpo-figura>
+    <svg viewBox="0 0 120 205" role=img aria-label="${esc(titulo)}">${SILUETA}${cuerpo}</svg>
+    <div class=rotulo>${esc(titulo)}</div></div>`;
+}
+
+async function pintarMusculos(seccion) {
+  const caja = seccion.querySelector("#mapa-muscular");
+  if (!caja) return;
+  try {
+    const datos = await pedirCache(`${API}/musculos?dias=30`);
+    if (datos.garmin_linked === false) { caja.innerHTML = ""; return; }
+    const valores = datos.muscles || {};
+    const etiquetas = datos.regions || {};
+    const tope = Math.max(0, ...Object.values(valores));
+
+    if (!tope && !datos.unknown_sets) {
+      caja.innerHTML = `<p class=nota-vacia>Sin series de fuerza clasificadas en
+        los últimos ${datos.days} días.</p>`;
+      return;
+    }
+
+    const chips = Object.entries(valores)
+      .sort((a, b) => b[1] - a[1])
+      .map(([r, v]) => `<span class=chip><b>${esc(etiquetas[r] || r)}</b> ${NUM(v, v % 1 ? 1 : 0)}</span>`)
+      .join("");
+
+    caja.innerHTML = `
+      <div class=cuerpos>
+        ${figura(CUERPO_FRENTE, "Frente", valores, etiquetas, tope)}
+        ${figura(CUERPO_ESPALDA, "Espalda", valores, etiquetas, tope)}
+      </div>
+      <div class=chips style="margin-top:1rem">${chips}</div>
+      ${datos.unknown_sets ? `<p class=aviso>Además hay <b>${datos.unknown_sets}
+        series sin identificar</b>: el reloj no supo qué ejercicio eran. Cuéntaselo
+        a tu asistente y las repartirá en el mapa.</p>` : ""}`;
+  } catch (e) {
+    caja.innerHTML = `<p class=nota-vacia>No se pudo cargar el mapa muscular: ${esc(e.message)}</p>`;
+  }
+}
+
 const COMPOSICION = [
   { campo: "body_fat_pct", nombre: "Grasa corporal", unidad: "%", decimales: 1 },
   { campo: "muscle_mass_kg", nombre: "Masa muscular", unidad: "kg", decimales: 2 },
@@ -557,6 +669,10 @@ async function pintarCuerpo(seccion, dias = 90) {
     <div class=encabezado><div><h1>Cuerpo</h1>
       <div class=fecha>Últimos ${datos.days} días</div></div></div>
     ${bloque}
+    <div class=titulo-seccion>Músculos entrenados · últimos 30 días</div>
+    <div class=tarjeta-panel id=mapa-muscular>
+      <div class=esqueleto style="height:180px"></div>
+    </div>
     <div class=titulo-seccion>Peso en Garmin</div>
     <div class=tarjeta-panel>
       ${pesajesGarmin ? `<div class=metricas style="border:0">
@@ -569,6 +685,9 @@ async function pintarCuerpo(seccion, dias = 90) {
       <p class=aviso>Son los pesajes de Garmin Connect: los que tecleas a mano o
       apunta el asistente. La báscula inteligente va por su cuenta y mide más cosas.</p>
     </div>`;
+
+  // El mapa muscular va por su cuenta para no retrasar el peso, que ya esta.
+  pintarMusculos(seccion);
 }
 
 /* ================================================================= ANÁLISIS */

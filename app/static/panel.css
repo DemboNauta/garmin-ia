@@ -322,6 +322,23 @@
 }
 .chip b { color: var(--texto); font-weight: 650; }
 
+/* ------------------------------------------------------------ mapa muscular */
+.cuerpos {
+  display: flex;
+  justify-content: center;
+  gap: clamp(1rem, 6vw, 4rem);
+}
+.cuerpo-figura { text-align: center; }
+.cuerpo-figura svg { width: clamp(130px, 30vw, 190px); height: auto; display: block; }
+.cuerpo-figura .rotulo { margin-top: .5rem; }
+.cuerpo-figura .silueta { fill: rgba(255, 255, 255, .03); }
+.cuerpo-figura .musculo {
+  stroke: rgba(255, 255, 255, .08);
+  stroke-width: .6;
+  transition: filter .15s;
+}
+.cuerpo-figura .musculo:hover { filter: brightness(1.35); }
+
 /* ------------------------------------------------------------------ ajustes */
 .conexion {
   display: flex;
