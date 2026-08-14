@@ -115,9 +115,9 @@ cualquier Garmin que vincules —Fénix, Forerunner, Edge, Cirqa— sin tocar c�
 | | |
 |---|---|
 | **API y MCP** | FastAPI, servidor MCP por HTTP con streaming |
-| **Caché** | SQLite, particionada por usuario |
+| **Caché** | SQLite, particionada por usuario; un día se congela 12 h después de cerrar, el día en curso caduca a los 15 min |
 | **Auth** | OAuth 2.1 con PKCE y registro dinámico de clientes |
-| **Sincronización** | APScheduler, horaria con backfill de 7 días |
+| **Sincronización** | APScheduler, horaria con backfill de 7 días; las lecturas rellenan los huecos que encuentren |
 
 ## Seguridad
 

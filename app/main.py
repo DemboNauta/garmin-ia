@@ -177,16 +177,17 @@ def health() -> dict:
 @app.get("/metrics")
 def metrics(days: int = 7, usuario: str = Depends(usuario_autenticado)) -> list[dict]:
     end = sync.today()
-    return [
-        sync.flatten_daily(r)
-        for r in store.get_daily_range(usuario, end - dt.timedelta(days=days - 1), end)
-    ]
+    start = end - dt.timedelta(days=days - 1)
+    sync.asegurar_dias(usuario, start, end)
+    return [sync.flatten_daily(r) for r in store.get_daily_range(usuario, start, end)]
 
 
 @app.get("/activities")
 def activities(days: int = 30, usuario: str = Depends(usuario_autenticado)) -> list[dict]:
     end = sync.today()
-    return store.get_activities(usuario, end - dt.timedelta(days=days - 1), end)
+    start = end - dt.timedelta(days=days - 1)
+    sync.asegurar_actividades(usuario, start, end)
+    return store.get_activities(usuario, start, end)
 
 
 @app.post("/sync")

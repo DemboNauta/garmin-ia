@@ -117,17 +117,27 @@ def get_metrics(days: int = 7, refresh: bool = False) -> list[dict]:
     start = end - dt.timedelta(days=days - 1)
     if refresh:
         sync.sync_range(usuario_actual(), days)
+    else:
+        sync.asegurar_dias(usuario_actual(), start, end)
     rows = store.get_daily_range(usuario_actual(), start, end)
-    if not rows:
-        sync.sync_range(usuario_actual(), days)
-        rows = store.get_daily_range(usuario_actual(), start, end)
     return [sync.flatten_daily(r) for r in rows]
 
 
 @mcp.tool()
 def get_today() -> dict:
     """Estado de hoy: la foto que hay que mirar antes de proponer sesion."""
-    return sync.sync_day(usuario_actual(), sync.today())
+    usuario, hoy = usuario_actual(), sync.today()
+    sync.asegurar_dias(usuario, hoy, hoy)
+    cacheado = store.get_daily(usuario, hoy)
+    if cacheado is None:
+        # Ni cache ni descarga. Pasa de madrugada, cuando Garmin aun no tiene
+        # nada del dia, y decirlo es mejor que devolver una foto en blanco que
+        # el modelo leeria como "cero pasos, cero sueño".
+        raise sync.SincronizacionVacia(
+            f"Garmin todavia no tiene datos de {hoy.isoformat()}. "
+            "Prueba con get_metrics para ver los dias anteriores."
+        )
+    return sync.flatten_daily(cacheado)
 
 
 @mcp.tool()
@@ -135,11 +145,8 @@ def get_activities(days: int = 30) -> list[dict]:
     """Entrenamientos registrados en los ultimos N dias (resumen por sesion)."""
     end = sync.today()
     start = end - dt.timedelta(days=days - 1)
+    sync.asegurar_actividades(usuario_actual(), start, end)
     acts = store.get_activities(usuario_actual(), start, end)
-    if not acts:
-        acts = _cliente().activities(start, end)
-        for a in acts:
-            store.save_activity(usuario_actual(), a)
     return [
         {
             "id": a.get("activityId"),

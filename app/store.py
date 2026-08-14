@@ -103,6 +103,17 @@ CREATE TABLE IF NOT EXISTS activities (
     PRIMARY KEY (user_id, activity_id)
 );
 CREATE INDEX IF NOT EXISTS idx_activities_day ON activities(user_id, day);
+-- Marcas de "este dia ya lo mire". Hacen falta porque la ausencia de filas en
+-- `activities` es ambigua: un dia de descanso y un dia sin sincronizar se ven
+-- exactamente igual, y sin distinguirlos o se repregunta siempre o no se
+-- repregunta nunca.
+CREATE TABLE IF NOT EXISTS sync_marks (
+    user_id    TEXT NOT NULL,
+    scope      TEXT NOT NULL,
+    day        TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, scope, day)
+);
 """
 
 
@@ -285,6 +296,21 @@ def get_daily_range(user_id: str, start: dt.date, end: dt.date) -> list[dict]:
     return [json.loads(r["payload"]) for r in rows]
 
 
+def get_daily_fetched_at(user_id: str, start: dt.date, end: dt.date) -> dict[str, dt.datetime]:
+    """Cuando se bajo cada dia cacheado del rango, indexado por fecha.
+
+    Es lo que permite distinguir un dia cerrado de uno que se cogio a media
+    tarde y quedo a medias. La columna existia desde el principio pero no la
+    leia nadie.
+    """
+    with conn() as c:
+        rows = c.execute(
+            "SELECT day, fetched_at FROM daily WHERE user_id=? AND day BETWEEN ? AND ?",
+            (user_id, start.isoformat(), end.isoformat()),
+        ).fetchall()
+    return {r["day"]: dt.datetime.fromisoformat(r["fetched_at"]) for r in rows}
+
+
 def all_daily(user_id: str) -> list[tuple[str, dict]]:
     """Todos los dias cacheados de un usuario, para poder auditarlos."""
     with conn() as c:
@@ -320,3 +346,36 @@ def get_activities(user_id: str, start: dt.date, end: dt.date) -> list[dict]:
             (user_id, start.isoformat(), end.isoformat()),
         ).fetchall()
     return [json.loads(r["payload"]) for r in rows]
+
+
+def delete_activities(user_id: str, start: dt.date, end: dt.date) -> None:
+    """Vacia un rango antes de reescribirlo con lo que diga Garmin.
+
+    Sin esto una sesion borrada en la app seguiria en la cache para siempre:
+    save_activity solo inserta y actualiza, nunca quita.
+    """
+    with conn() as c:
+        c.execute(
+            "DELETE FROM activities WHERE user_id=? AND day BETWEEN ? AND ?",
+            (user_id, start.isoformat(), end.isoformat()),
+        )
+
+
+# ------------------------------------------------------------ marcas de sync
+def mark_synced(user_id: str, scope: str, day: dt.date) -> None:
+    with conn() as c:
+        c.execute(
+            "INSERT INTO sync_marks(user_id, scope, day, fetched_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(user_id, scope, day) DO UPDATE SET fetched_at=excluded.fetched_at",
+            (user_id, scope, day.isoformat(), _now()),
+        )
+
+
+def get_sync_marks(user_id: str, scope: str, start: dt.date, end: dt.date) -> dict[str, dt.datetime]:
+    with conn() as c:
+        rows = c.execute(
+            "SELECT day, fetched_at FROM sync_marks "
+            "WHERE user_id=? AND scope=? AND day BETWEEN ? AND ?",
+            (user_id, scope, start.isoformat(), end.isoformat()),
+        ).fetchall()
+    return {r["day"]: dt.datetime.fromisoformat(r["fetched_at"]) for r in rows}
