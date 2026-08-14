@@ -79,6 +79,16 @@ CREATE TABLE IF NOT EXISTS garmin_sessions (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
+-- Bascula inteligente vinculada, una por usuario. Se guarda el token de la
+-- nube del fabricante cifrado igual que el de Garmin, nunca su contraseña.
+CREATE TABLE IF NOT EXISTS scale_links (
+    user_id     TEXT PRIMARY KEY,
+    provider    TEXT NOT NULL,
+    account     TEXT,
+    session_enc TEXT NOT NULL,
+    linked_at   TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
 -- Preferencias de entrenamiento: material, reparto, lesiones. Lo que Garmin no
 -- sabe y el modelo necesita para no proponer a ciegas.
 CREATE TABLE IF NOT EXISTS user_profiles (
@@ -219,8 +229,10 @@ def listar_usuarios() -> list[dict]:
     with conn() as c:
         rows = c.execute(
             "SELECT u.user_id, u.email, u.created_at, u.is_admin, "
-            "       (s.user_id IS NOT NULL) AS garmin_vinculado "
+            "       (s.user_id IS NOT NULL) AS garmin_vinculado, "
+            "       b.provider AS bascula "
             "FROM users u LEFT JOIN garmin_sessions s ON s.user_id = u.user_id "
+            "LEFT JOIN scale_links b ON b.user_id = u.user_id "
             "ORDER BY u.created_at"
         ).fetchall()
     return [dict(r) for r in rows]
@@ -240,7 +252,8 @@ def marcar_admin(user_id: str, admin: bool = True) -> None:
 def borrar_usuario(user_id: str) -> None:
     """Elimina al usuario y todo lo suyo. Sin esto no hay derecho de supresion."""
     with conn() as c:
-        for tabla in ("daily", "activities", "garmin_sessions", "user_profiles", "users"):
+        for tabla in ("daily", "activities", "garmin_sessions", "scale_links",
+                      "user_profiles", "users"):
             c.execute(f"DELETE FROM {tabla} WHERE user_id=?", (user_id,))
 
 
@@ -266,6 +279,31 @@ def leer_tokens_garmin(user_id: str) -> str | None:
 def borrar_tokens_garmin(user_id: str) -> None:
     with conn() as c:
         c.execute("DELETE FROM garmin_sessions WHERE user_id=?", (user_id,))
+
+
+# ------------------------------------------------------------ bascula vinculada
+def guardar_bascula(user_id: str, provider: str, account: str, session_enc: str) -> None:
+    """Una bascula por usuario: volver a vincular sustituye a la anterior."""
+    with conn() as c:
+        c.execute(
+            "INSERT INTO scale_links(user_id, provider, account, session_enc, linked_at) "
+            "VALUES(?,?,?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET provider=excluded.provider, "
+            "account=excluded.account, session_enc=excluded.session_enc, "
+            "linked_at=excluded.linked_at",
+            (user_id, provider, account, session_enc, _now()),
+        )
+
+
+def leer_bascula(user_id: str) -> dict | None:
+    with conn() as c:
+        fila = c.execute("SELECT * FROM scale_links WHERE user_id=?", (user_id,)).fetchone()
+    return dict(fila) if fila else None
+
+
+def borrar_bascula(user_id: str) -> None:
+    with conn() as c:
+        c.execute("DELETE FROM scale_links WHERE user_id=?", (user_id,))
 
 
 # ------------------------------------------------------------------ metricas

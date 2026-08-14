@@ -1,8 +1,8 @@
-"""Paginas web: alta por invitacion, inicio de sesion y vinculacion de Garmin.
+"""Paginas web: alta por invitacion, inicio de sesion y vinculacion de cuentas.
 
-Por que hay HTML en un servidor MCP: las credenciales de Garmin NO pueden
-pedirse con una herramienta MCP. Si lo hicieran, la contraseña del usuario
-pasaria por el contexto del modelo y quedaria en el historial de la
+Por que hay HTML en un servidor MCP: las credenciales de Garmin o de la bascula
+NO pueden pedirse con una herramienta MCP. Si lo hicieran, la contraseña del
+usuario pasaria por el contexto del modelo y quedaria en el historial de la
 conversacion. Aqui van directas del navegador al servidor.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import logging
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from . import accounts, garmin_client, store
+from . import accounts, garmin_client, scales, store
 from .config import settings
 from .oauth_provider import proveedor
 
@@ -50,10 +50,10 @@ h2 { font-size: 1rem; margin: 2rem 0 .6rem; letter-spacing: -.01em; }
 p { margin: 0 0 1rem; }
 p.sub { color: var(--suave); font-size: .93rem; margin-bottom: 1.75rem; }
 label { display: block; font-size: .8rem; font-weight: 600; margin: 1.1rem 0 .4rem; }
-input { width: 100%; padding: .7rem .8rem; font-size: 1rem; border-radius: 9px;
+input, select { width: 100%; padding: .7rem .8rem; font-size: 1rem; border-radius: 9px;
         border: 1px solid var(--borde); background: var(--fondo); color: var(--texto);
         transition: border-color .15s; }
-input:focus { outline: none; border-color: var(--acento);
+input:focus, select:focus { outline: none; border-color: var(--acento);
               box-shadow: 0 0 0 3px color-mix(in srgb, var(--acento) 18%, transparent); }
 button { width: 100%; margin-top: 1.6rem; padding: .75rem; font-size: .95rem;
          font-weight: 600; color: #fff; background: var(--acento); border: 0;
@@ -180,9 +180,10 @@ def panel(request: Request, error: str = "", nuevo: str = "") -> HTMLResponse:
     for u in store.listar_usuarios():
         marca = " · admin" if u["is_admin"] else ""
         garmin = "Garmin vinculado" if u["garmin_vinculado"] else "sin vincular"
+        bascula = f" · báscula {u['bascula']}" if u["bascula"] else ""
         filas.append(
             f"<div class=dato><b>{html.escape(u['email'] or u['user_id'])}{marca}</b>"
-            f"<span>{garmin} · desde {u['created_at'][:10]}</span></div>"
+            f"<span>{garmin}{html.escape(bascula)} · desde {u['created_at'][:10]}</span></div>"
         )
 
     pendientes = [i for i in accounts.listar_invitaciones() if not i["used_at"]]
@@ -409,5 +410,77 @@ def _guardar_vinculo(user_id: str, api) -> HTMLResponse:
         "<h1>Garmin conectado</h1>"
         "<p class=sub>Ya puedes volver a tu asistente y añadir el conector. "
         "Tus métricas estarán disponibles ahí.</p>"
-        f"<div class=ok>Vinculado correctamente.</div>",
+        f"<div class=ok>Vinculado correctamente.</div>"
+        f"<p class=aviso>¿Tienes una báscula inteligente? "
+        f"<a href='/vincular-bascula?u={html.escape(user_id)}'>Vincúlala también</a> "
+        f"y el asistente verá tu grasa y tu masa muscular, no solo el peso.</p>",
+    )
+
+
+# ------------------------------------------------------------ vinculacion de bascula
+@router.get("/vincular-bascula", response_class=HTMLResponse)
+def form_bascula(u: str = "", error: str = "") -> HTMLResponse:
+    if not u or not store.existe_usuario(u):
+        return _pagina("Usuario desconocido", "<h1>Usuario desconocido</h1>", codigo=404)
+
+    marcas = "".join(
+        f"<option value='{html.escape(p['id'])}'>{html.escape(p['name'])} — "
+        f"{html.escape(p['description'])}</option>"
+        for p in scales.catalogo()
+    )
+    ya = scales.estado(u)
+    aviso_actual = (
+        f"<div class=ok>Ahora mismo tienes vinculada {html.escape(ya['name'])} "
+        f"({html.escape(ya['account'] or '')}). Si vuelves a vincular, la sustituye.</div>"
+        if ya else ""
+    )
+    return _pagina(
+        "Vincular báscula",
+        f"<h1>Conecta tu báscula</h1>"
+        f"<p class=sub>Las mismas credenciales con las que entras en la app de la "
+        f"báscula. Se usan una sola vez para obtener un permiso de acceso: la "
+        f"contraseña no se guarda.</p>"
+        f"{aviso_actual}"
+        f"{_aviso(error) if error else ''}"
+        f"<form method=post>"
+        f"<input type=hidden name=u value='{html.escape(u)}'>"
+        f"<label for=provider>Marca</label>"
+        f"<select id=provider name=provider required>{marcas}</select>"
+        f"<label for=email>Email de la cuenta</label>"
+        f"<input id=email name=email type=email required autocomplete=off>"
+        f"<label for=password>Contraseña</label>"
+        f"<input id=password name=password type=password required autocomplete=off>"
+        f"<button type=submit>Vincular báscula</button></form>"
+        f"<p class=aviso>Los pesajes se leen de la nube del fabricante, así que "
+        f"tienen que haberse sincronizado antes desde su app.</p>",
+    )
+
+
+@router.post("/vincular-bascula", response_class=HTMLResponse)
+def vincular_bascula(
+    u: str = Form(...),
+    provider: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+):
+    if not store.existe_usuario(u):
+        return _pagina("Usuario desconocido", "<h1>Usuario desconocido</h1>", codigo=404)
+    try:
+        vinculo = scales.vincular(u, provider, email, password)
+    except Exception as exc:  # noqa: BLE001
+        # El mensaje del fabricante ya es legible ("Account does not exist..."),
+        # asi que se enseña tal cual en vez de taparlo con uno generico.
+        log.info("Fallo vinculando bascula %s de %s: %s", provider, u, exc)
+        return form_bascula(u, error=f"No se pudo vincular: {exc}"[:200])
+
+    aparatos = ", ".join(
+        " ".join(x for x in (d.get("brand"), d.get("model")) if x) for d in vinculo["devices"]
+    )
+    return _pagina(
+        "Listo",
+        f"<h1>Báscula conectada</h1>"
+        f"<p class=sub>Tu asistente ya puede ver tu peso y tu composición corporal, "
+        f"y seguir cómo evolucionan.</p>"
+        f"<div class=ok>{html.escape(vinculo['name'])} vinculada"
+        f"{' · ' + html.escape(aparatos) if aparatos else ''}.</div>",
     )

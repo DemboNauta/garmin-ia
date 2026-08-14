@@ -11,7 +11,7 @@ import logging
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import activities, profile, store, sync, weight, workouts
+from . import activities, profile, scales, store, sync, weight, workouts
 from .config import settings
 from .garmin_client import para_usuario
 from .identity import usuario_actual
@@ -31,6 +31,11 @@ Cuando cuente algo estable de su forma de entrenar, guardalo con
 update_profile en vez de fiarlo a la memoria de la conversacion, que se pierde.
 El peso corporal no va ahi: se lee con get_weight y se apunta con log_weight,
 que lo dejan en Garmin con su fecha y hacen serie.
+
+Si tiene bascula inteligente vinculada, get_body_composition manda sobre
+get_weight: mide a diario y separa grasa de musculo, que es lo unico que
+distingue adelgazar de perder lo que se estaba construyendo. Fijate en la media
+de siete dias, no en el ultimo pesaje, que oscila mas de un kilo en el dia.
 
 Para crear fuerza, el orden es: find_exercises para dar con el nombre exacto
 (el catalogo esta SOLO en ingles) y luego create_workout con ese nombre en
@@ -376,6 +381,50 @@ def log_weight(weight_kg: float, when: str | None = None) -> dict:
     """
     _cliente().add_weigh_in(weight_kg, weight.momento(when))
     return {"weight_kg": weight_kg, "logged": True}
+
+
+@mcp.tool()
+def get_body_composition(days: int = 90) -> dict:
+    """Peso y composicion corporal medidos por su bascula inteligente, con la
+    tendencia: grasa, musculo, agua, hueso, IMC y metabolismo basal.
+
+    Esto es lo que hay que mirar para juzgar si un plan funciona. El peso a
+    secas no distingue perder grasa de perder musculo, y son cosas opuestas:
+    dos kilos menos con la grasa igual significa que se esta perdiendo lo que
+    interesa conservar.
+
+    Es distinto de get_weight, que da los pesajes de Garmin (los que se apuntan
+    a mano o manda una bascula de la marca). Aqui se mide todos los dias y con
+    bioimpedancia. Si la persona tiene bascula vinculada, esta es la buena.
+
+    Cada `*_trend` trae el cambio del periodo y, sobre todo, la media de los
+    ultimos 7 dias contra la de los 7 anteriores (`change_per_week`): el peso
+    oscila mas de un kilo entre la mañana y la noche, asi que comparar dos
+    pesajes sueltos no dice nada.
+    """
+    usuario = usuario_actual()
+    try:
+        return scales.resumen(usuario, days)
+    except scales.SinBascula:
+        return {
+            "linked": False,
+            "providers": scales.catalogo(),
+            "note": (
+                "No hay bascula vinculada. Se hace desde la web, no desde aqui, "
+                "porque la contraseña de la bascula no puede pasar por la "
+                f"conversacion: {settings.public_url}/vincular-bascula?u={usuario}. "
+                "Mientras tanto, el peso de Garmin se lee con get_weight."
+            ),
+        }
+    except scales.SesionCaducada as exc:
+        return {
+            "linked": True,
+            "expired": True,
+            "note": (
+                f"{exc} Se vuelve a vincular en "
+                f"{settings.public_url}/vincular-bascula?u={usuario}"
+            ),
+        }
 
 
 @mcp.tool()

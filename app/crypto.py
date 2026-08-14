@@ -52,5 +52,5 @@ def descifrar(blob: str) -> str:
     except InvalidToken as exc:
         raise ErrorDeCifrado(
             "No se pudo descifrar el token: la GB_ENCRYPTION_KEY no es la que "
-            "cifro este dato. El usuario tendra que volver a vincular Garmin."
+            "cifro este dato. El usuario tendra que volver a vincular la cuenta."
         ) from exc

@@ -55,6 +55,7 @@ muscular.
 | `get_activities(days)` | Sesiones con FC media, ritmo y training effect |
 | `get_activity(id)` | Una sesión al detalle, con sus series |
 | `get_weight(days)` | Pesajes del periodo, con la media y el cambio |
+| `get_body_composition(days)` | Peso, grasa, músculo y agua de tu báscula, con la tendencia semanal |
 | `get_devices` | Qué Garmin hay vinculados y su última sincronización |
 
 | Corregir lo ya hecho | |
@@ -95,6 +96,26 @@ el peso queda registrado.
 > «En la sesión de ayer las dos primeras series eran press de banca con 40, y la
 > tercera no la contó.»
 
+## Báscula inteligente
+
+Garmin solo conoce el peso que tecleas a mano. Si vinculas tu báscula de
+bioimpedancia, el asistente ve además **grasa, músculo, agua, hueso, IMC y
+metabolismo basal**, medidos todos los días. Es lo que distingue adelgazar de
+perder lo que estabas construyendo: dos kilos menos con la grasa igual son dos
+kilos de músculo.
+
+Se vincula en `/vincular-bascula`, eligiendo marca. Hoy hay una:
+
+| Proveedor | Nube |
+|---|---|
+| **FeelFit** | `feelfit.qnclouds.com` (básculas QN Cloud) |
+
+Como con Garmin, la contraseña se usa una vez para conseguir un permiso y no se
+guarda; el permiso queda cifrado. Añadir otra marca es escribir su módulo
+—`iniciar_sesion`, `medidas`, `dispositivos`— y una línea en `scales.py`.
+
+> «¿Estoy perdiendo grasa o músculo este mes?»
+
 ## Arquitectura
 
 ```mermaid
@@ -102,6 +123,9 @@ flowchart LR
     D[Dispositivo Garmin] -->|BLE| A[App Garmin Connect]
     A --> G[(Garmin Cloud)]
     G -->|garminconnect| B
+    E[Báscula] -->|BLE| F[App FeelFit]
+    F --> H[(QN Cloud)]
+    H -->|API no oficial| B
     subgraph VPS[VPS · systemd + Caddy]
         B[Garmin Bridge<br/>FastAPI + SQLite]
     end
@@ -160,7 +184,7 @@ python -m app.admin invitar tu@email.com
 ```
 
 **`GB_ENCRYPTION_KEY` es crítica**: si se pierde, todos los usuarios tienen que
-volver a vincular Garmin. Guárdala separada de la base de datos, o el cifrado no
+volver a vincular Garmin y su báscula. Guárdala separada de la base de datos, o el cifrado no
 protege de nada.
 
 ## Avisos
@@ -169,6 +193,11 @@ protege de nada.
   usa endpoints internos y Garmin puede romperla en cualquier actualización. El
   acoplamiento está aislado en `garmin_client.py` y `workouts.py`: migrar a la
   API oficial solo tocaría esos dos.
+- **La de la báscula tampoco es oficial.** FeelFit no publica API: `feelfit.py`
+  habla el mismo protocolo que su app de Android, descifrado por
+  [Sanji78/feelfit](https://github.com/Sanji78/feelfit) y
+  [tecnologicachile/mcp-feelfit](https://github.com/tecnologicachile/mcp-feelfit).
+  Puede dejar de funcionar sin aviso; los pesajes de Garmin no dependen de ella.
 - **No hagas login en bucle.** Garmin limita por IP. La librería encadena cinco
   estrategias, así que es normal ver fallar las primeras; insistir solo alarga
   el bloqueo.
