@@ -20,8 +20,9 @@ tu HRV y tu recuperación, y escribe entrenamientos estructurados en tu cuenta.
 
 ## Qué hace
 
-No es un cuadro de mandos más. Es la **fontanería** que le da a un modelo acceso
-a tus métricas reales y capacidad de escribir en tu cuenta de Garmin.
+Es la **fontanería** que le da a un modelo acceso a tus métricas reales y
+capacidad de escribir en tu cuenta de Garmin, más un **panel** donde ves tus
+datos y lo que el asistente ha concluido de ellos.
 
 La inteligencia no vive aquí: las herramientas entregan datos limpios y ejecutan
 órdenes, y decidir qué entrenamiento toca es trabajo del modelo.
@@ -45,6 +46,9 @@ muscular.
    En Claude: `Configuración → Conectores → Añadir conector personalizado`.
 
 4. **Autoriza.** Se abre una ventana para iniciar sesión. Ya está.
+
+A partir de ahí tienes las dos mitades: el asistente, en tu conversación, y tu
+**panel** en `/panel`, con la misma cuenta.
 
 ## Herramientas
 
@@ -78,6 +82,12 @@ muscular.
 | `list_muscle_groups` | Las 47 categorías, que son los grupos musculares |
 | `list_scheduled(year, month)` · `schedule_workout` · `unschedule_workout` | |
 
+| Dejar constancia | |
+|---|---|
+| `save_insight(insight)` | Guarda una conclusión: sale en el panel del usuario |
+| `list_insights(limit, kind)` | Lo que ya se había concluido, para recuperar el hilo |
+| `delete_insight(id)` | Retira una que resultó estar equivocada |
+
 **Los ejercicios de fuerza se identifican de verdad.** Cada paso lleva su
 `category` de Garmin —el grupo muscular— en vez de quedar descrito en las notas,
 que es texto libre que después no se puede agregar ni analizar.
@@ -95,6 +105,32 @@ el peso queda registrado.
 
 > «En la sesión de ayer las dos primeras series eran press de banca con 40, y la
 > tercera no la contó.»
+
+## El panel
+
+En `/panel`, con la sesión del navegador. Estilo WHOOP: negro, tres anillos y
+los números grandes, pensado para mirarlo en el móvil al levantarse.
+
+| | |
+|---|---|
+| **Hoy** | Recuperación, sueño y Body Battery en anillos; **el análisis de la IA justo debajo**; y cada métrica comparada con tu media de 30 días |
+| **Tendencias** | Nueve series a 7, 30 o 90 días, con los huecos a la vista: si un día no hay dato, se ve que no lo hay |
+| **Sesiones** | Lo que grabó el reloj, con FC, calorías y efecto de entrenamiento |
+| **Cuerpo** | Peso y composición de la báscula, con la tendencia semanal |
+| **Análisis** | Todo lo que el asistente ha dejado escrito, fechado y con sus números |
+| **Ajustes** | Estado de Garmin y de la báscula, dirección del conector y perfil de entrenamiento |
+
+**Lo que la IA analiza se queda por escrito.** Es lo único que no sale de
+Garmin: cuando el modelo llega a una conclusión que merece releerse llama a
+`save_insight`, y ahí sigue un mes después, cuando ya no queda ni rastro de
+aquella conversación. Con `list_insights` el modelo también recupera el hilo en
+vez de empezar de cero cada vez.
+
+> «Mira cómo he dormido esta semana y déjamelo apuntado.»
+
+Sin dependencias ni compilación: HTML, una hoja de estilo y un fichero de
+JavaScript servidos por el propio FastAPI. En el móvil la navegación se va a una
+barra inferior, donde llega el pulgar.
 
 ## Báscula inteligente
 
@@ -130,6 +166,7 @@ flowchart LR
         B[Garmin Bridge<br/>FastAPI + SQLite]
     end
     B -->|MCP + OAuth 2.1| C[Claude · ChatGPT]
+    B -->|panel web| N[Navegador]
     B -->|REST + bearer| R[Lo que quieras]
 ```
 
@@ -154,6 +191,9 @@ Guardar datos de salud y credenciales de terceros obliga a ser serio:
 - **Tokens de Garmin cifrados** con Fernet. Nunca tocan el disco en claro.
 - **Contraseñas con scrypt**; códigos y tokens OAuth se guardan hasheados. Una
   copia de la base no permite suplantar a nadie.
+- **El navegador se identifica con una sesión**, no con la URL. Ni el panel ni
+  las páginas de vinculación aceptan un `user_id` por parámetro: la cookie es
+  HttpOnly, SameSite=Strict y revocable desde la base.
 - **Códigos de un solo uso** y rotación del refresh token, como pide OAuth 2.1.
 - **Alta solo por invitación**, de un uso y con caducidad. No hay registro
   abierto.

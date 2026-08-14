@@ -1,0 +1,228 @@
+/* Base comun a todas las paginas: tokens, tipografia y formularios.
+ *
+ * El sitio es oscuro y punto, sin seguir la preferencia del sistema. No es
+ * capricho: la pantalla principal son anillos de color sobre negro, y en claro
+ * ni el verde de recuperacion ni el rojo se distinguen a un metro de distancia,
+ * que es como se mira esto por la mañana. Un solo tema tambien significa un
+ * solo juego de colores que revisar cuando se toca uno. */
+
+:root {
+  color-scheme: dark;
+
+  /* Fondos, del mas hondo al mas cercano */
+  --negro: #08080a;
+  --carbon: #121215;
+  --carbon-alto: #1a1a1f;
+  --linea: rgba(255, 255, 255, .09);
+  --linea-fuerte: rgba(255, 255, 255, .16);
+
+  /* Texto */
+  --texto: #f7f7f8;
+  --tenue: rgba(255, 255, 255, .58);
+  --apagado: rgba(255, 255, 255, .34);
+
+  /* Acentos. Verde recuperado, amarillo aviso, rojo alarma y azul de sueño:
+     los mismos cuatro con los que se pinta todo, para que un color signifique
+     siempre lo mismo mire donde mire. */
+  --verde: #00f19f;
+  --amarillo: #ffde00;
+  --rojo: #ff2d4b;
+  --azul: #0093e7;
+  --violeta: #9a7bff;
+
+  --radio: 16px;
+  --radio-chico: 10px;
+  --sombra: 0 1px 0 rgba(255, 255, 255, .04) inset;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--negro);
+  color: var(--texto);
+  font-family: "Segoe UI Variable Display", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", Inter, Roboto, system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Etiqueta pequeña en versalitas: es el recurso tipografico que sostiene toda
+   la interfaz, asi que vive aqui y no repetido en cada bloque. */
+.rotulo,
+label,
+.metrica b,
+.titulo-seccion {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--tenue);
+}
+
+/* Los numeros no bailan al actualizarse */
+.cifra, .metrica strong, .anillo text { font-variant-numeric: tabular-nums; }
+
+a { color: inherit; }
+a:hover { color: var(--verde); }
+
+/* ------------------------------------------------------------------ marca */
+.marca {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  font-size: .95rem;
+  text-decoration: none;
+}
+.punto {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 8px;
+  flex: none;
+  background: linear-gradient(140deg, var(--verde), var(--azul));
+}
+
+/* ------------------------------------------------- paginas de formulario */
+body.formulario {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2.5rem 1.25rem;
+}
+body.formulario main { width: 100%; max-width: 27rem; }
+body.formulario main.ancho { max-width: 44rem; }
+
+.tarjeta {
+  background: var(--carbon);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio);
+  padding: 2rem;
+  box-shadow: var(--sombra);
+}
+.tarjeta .marca { margin-bottom: 1.75rem; }
+
+h1 { font-size: 1.45rem; line-height: 1.2; margin: 0 0 .5rem; letter-spacing: -.02em; }
+h2 { font-size: 1rem; margin: 2rem 0 .6rem; letter-spacing: -.01em; }
+p { margin: 0 0 1rem; }
+p.sub { color: var(--tenue); font-size: .93rem; margin-bottom: 1.75rem; }
+
+label { display: block; margin: 1.1rem 0 .45rem; }
+
+input, select {
+  width: 100%;
+  padding: .72rem .8rem;
+  font: inherit;
+  font-size: 1rem;
+  color: var(--texto);
+  background: var(--negro);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio-chico);
+  transition: border-color .15s, box-shadow .15s;
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--verde);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--verde) 22%, transparent);
+}
+
+button, .boton {
+  display: block;
+  width: 100%;
+  margin-top: 1.6rem;
+  padding: .8rem;
+  font: inherit;
+  font-size: .92rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-align: center;
+  text-decoration: none;
+  color: var(--negro);
+  background: var(--verde);
+  border: 0;
+  border-radius: var(--radio-chico);
+  cursor: pointer;
+  transition: filter .15s, background .15s;
+}
+button:hover, .boton:hover { filter: brightness(1.12); color: var(--negro); }
+
+/* Boton secundario: el mismo hueco, sin gritar. Vale igual para <button> que
+   para <a>, porque media interfaz son enlaces con pinta de boton. */
+.fantasma {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  margin: 0;
+  text-decoration: none;
+  padding: .45rem .85rem;
+  font-size: .78rem;
+  font-weight: 650;
+  letter-spacing: .06em;
+  color: var(--tenue);
+  background: transparent;
+  border: 1px solid var(--linea);
+  border-radius: 999px;
+}
+.fantasma:hover { color: var(--texto); border-color: var(--linea-fuerte); filter: none; }
+
+.error, .ok {
+  padding: .75rem .9rem;
+  font-size: .87rem;
+  border-radius: var(--radio-chico);
+  margin-bottom: 1.25rem;
+  border: 1px solid transparent;
+}
+.error { background: color-mix(in srgb, var(--rojo) 14%, transparent);
+         border-color: color-mix(in srgb, var(--rojo) 35%, transparent); color: #ff8b9d; }
+.ok    { background: color-mix(in srgb, var(--verde) 12%, transparent);
+         border-color: color-mix(in srgb, var(--verde) 30%, transparent); color: var(--verde); }
+
+.aviso {
+  font-size: .8rem;
+  color: var(--tenue);
+  margin: 1.5rem 0 0;
+  border-top: 1px solid var(--linea);
+  padding-top: 1.1rem;
+}
+
+ol { padding-left: 1.1rem; margin: 0 0 1rem; }
+ol li { margin-bottom: .9rem; }
+ol li::marker { color: var(--apagado); font-variant-numeric: tabular-nums; }
+
+code, .url {
+  font-family: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, monospace;
+  font-size: .86em;
+  background: var(--negro);
+  border: 1px solid var(--linea);
+  padding: .12em .4em;
+  border-radius: 6px;
+}
+.url {
+  display: block;
+  padding: .7rem .85rem;
+  margin: .6rem 0 0;
+  word-break: break-all;
+  font-size: .82rem;
+  color: var(--verde);
+}
+
+.rejilla {
+  display: grid;
+  gap: .8rem;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  margin: 1.25rem 0 0;
+}
+.dato {
+  border: 1px solid var(--linea);
+  border-radius: var(--radio-chico);
+  padding: .85rem .95rem;
+  background: var(--carbon-alto);
+}
+.dato b { display: block; font-size: .82rem; margin-bottom: .15rem; }
+.dato span { font-size: .8rem; color: var(--tenue); }

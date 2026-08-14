@@ -25,14 +25,17 @@ CREATE TABLE IF NOT EXISTS users (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL;
 
--- Sesiones del panel de administracion. Se guarda el hash de la cookie, no su
--- valor, y viven en la base para poder revocarlas de verdad.
-CREATE TABLE IF NOT EXISTS admin_sessions (
+-- Sesiones del navegador: panel del usuario y administracion. Se guarda el hash
+-- de la cookie, no su valor, y viven en la base para poder revocarlas de verdad.
+-- Ser administrador no es una sesion aparte, sino una comprobacion sobre la
+-- misma: asi el panel y /admin comparten un unico inicio de sesion.
+CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     user_id    TEXT NOT NULL,
     created_at TEXT NOT NULL,
     expires_at REAL NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
 -- Invitaciones: el servicio es cerrado, solo entra quien reciba una.
 -- Se guarda el hash, no el codigo, para que una copia de la base no valga
@@ -97,6 +100,21 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
+-- Lo que el modelo concluye. La inteligencia no vive aqui, pero su lectura se
+-- pierde con la conversacion: sin guardarla, el usuario no puede volver a leer
+-- por que le tocaba sesion suave el martes. Es texto que escribe el asistente,
+-- no un dato de Garmin, asi que va en su propia tabla y nunca se sincroniza.
+CREATE TABLE IF NOT EXISTS insights (
+    insight_id TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    title      TEXT NOT NULL,
+    body       TEXT NOT NULL,
+    payload    TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_insights_user ON insights(user_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS daily (
     user_id    TEXT NOT NULL,
     day        TEXT NOT NULL,
@@ -181,12 +199,27 @@ def _asegurar_columna(c: sqlite3.Connection, tabla: str, columna: str, tipo: str
         c.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}")
 
 
+def _jubilar_admin_sessions(c: sqlite3.Connection) -> None:
+    """Retira la tabla vieja de sesiones de administracion.
+
+    Ahora hay una sola tabla de sesiones para todo el navegador. No se migran
+    las filas a proposito: duran doce horas y volver a entrar cuesta nada, asi
+    que arrastrar el dato no compensa mantener dos tablas equivalentes.
+    """
+    if c.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='admin_sessions'"
+    ).fetchone():
+        log.warning("Retirando admin_sessions: las sesiones ahora van en 'sessions'")
+        c.execute("DROP TABLE admin_sessions")
+
+
 def init() -> None:
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
     with conn() as c:
         if _necesita_migracion(c):
             _migrar_a_multiusuario(c)
         c.executescript(SCHEMA)
+        _jubilar_admin_sessions(c)
         _asegurar_columna(c, "users", "password_hash", "TEXT")
         _asegurar_columna(c, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
         # Una invitacion con user_id no crea cuenta: reclama una que ya existe,
@@ -253,7 +286,7 @@ def borrar_usuario(user_id: str) -> None:
     """Elimina al usuario y todo lo suyo. Sin esto no hay derecho de supresion."""
     with conn() as c:
         for tabla in ("daily", "activities", "garmin_sessions", "scale_links",
-                      "user_profiles", "users"):
+                      "user_profiles", "insights", "sessions", "oauth_tokens", "users"):
             c.execute(f"DELETE FROM {tabla} WHERE user_id=?", (user_id,))
 
 

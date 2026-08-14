@@ -1,0 +1,438 @@
+/* El panel. Estilo WHOOP: negro, anillos de color y numeros grandes.
+ *
+ * La idea de fondo es la misma que la de ellos: la pantalla contesta a "¿como
+ * estoy hoy?" antes de que nadie lea nada. De ahi los tres anillos arriba del
+ * todo, tamaño desmesurado a proposito, y el resto de metricas en un segundo
+ * plano deliberadamente plano y gris para que no compitan. */
+
+/* ------------------------------------------------------------------ barra */
+.barra {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: .85rem clamp(1rem, 4vw, 2.5rem);
+  background: color-mix(in srgb, var(--negro) 88%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--linea);
+}
+.barra .marca { color: var(--texto); flex: none; }
+.barra-fin { display: flex; align-items: center; gap: .5rem; margin-left: auto; }
+.barra-fin form { margin: 0; }
+
+.pestanas {
+  display: flex;
+  gap: .35rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex: 1;
+}
+.pestanas::-webkit-scrollbar { display: none; }
+
+.pestana {
+  width: auto;
+  margin: 0;
+  padding: .5rem .8rem;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--apagado);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.pestana:hover { color: var(--texto); background: var(--carbon); filter: none; }
+.pestana.activa { color: var(--negro); background: var(--texto); }
+
+/* --------------------------------------------------------------- contenido */
+#contenido {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: clamp(1.25rem, 4vw, 2.5rem) clamp(1rem, 4vw, 2.5rem) 5rem;
+}
+.vista { display: none; }
+.vista.activa { display: block; animation: entra .28s ease both; }
+
+@keyframes entra {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.esqueleto {
+  height: 220px;
+  border-radius: var(--radio);
+  background: linear-gradient(100deg, var(--carbon) 30%, var(--carbon-alto) 50%, var(--carbon) 70%);
+  background-size: 220% 100%;
+  animation: brilla 1.4s linear infinite;
+}
+@keyframes brilla { to { background-position: -220% 0; } }
+
+/* Un usuario con el reloj sin sincronizar y otro con Garmin sin vincular ven
+   la misma pantalla vacia; el texto es lo unico que los distingue. */
+.vacio {
+  padding: 3rem 1.5rem;
+  text-align: center;
+  color: var(--tenue);
+  border: 1px dashed var(--linea);
+  border-radius: var(--radio);
+}
+.vacio b { display: block; color: var(--texto); font-size: 1.05rem; margin-bottom: .4rem; }
+.vacio .boton { display: inline-block; width: auto; padding: .6rem 1.4rem; margin-top: 1.2rem; }
+
+/* ---------------------------------------------------------------- cabecera */
+.encabezado {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.75rem;
+}
+.encabezado h1 { font-size: clamp(1.6rem, 4vw, 2.1rem); margin: 0; letter-spacing: -.03em; }
+.encabezado .fecha { color: var(--apagado); font-size: .85rem; }
+.desfasado {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .25rem .6rem;
+  font-size: .74rem;
+  color: var(--amarillo);
+  background: color-mix(in srgb, var(--amarillo) 12%, transparent);
+  border-radius: 999px;
+}
+
+/* ---------------------------------------------------------------- anillos */
+.anillos {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(.5rem, 2vw, 1.5rem);
+  padding: clamp(1.25rem, 3vw, 2.25rem) 1rem;
+  background: var(--carbon);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+}
+.anillo { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.anillo svg { width: clamp(108px, 22vw, 172px); height: auto; display: block; }
+.anillo .pista { stroke: rgba(255, 255, 255, .07); }
+.anillo .arco {
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  /* El arco se dibuja al entrar: es el gesto que da la sensacion de medida
+     recien tomada en vez de dato guardado. */
+  transition: stroke-dashoffset 1s cubic-bezier(.2, .8, .2, 1);
+}
+.anillo .valor { font-size: 30px; font-weight: 700; letter-spacing: -.04em; fill: var(--texto); }
+.anillo .unidad { font-size: 11px; font-weight: 650; letter-spacing: .1em; fill: var(--apagado); }
+.anillo .nombre { margin-top: .7rem; }
+.anillo .nota { margin-top: .2rem; font-size: .78rem; color: var(--apagado); }
+
+/* -------------------------------------------------------------- secciones */
+.titulo-seccion {
+  display: flex;
+  align-items: center;
+  gap: .9rem;
+  margin: 2.5rem 0 1rem;
+}
+.titulo-seccion::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--linea);
+}
+
+.tarjeta-panel {
+  background: var(--carbon);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio);
+  padding: 1.25rem 1.4rem;
+  box-shadow: var(--sombra);
+}
+
+/* --------------------------------------------------------------- metricas */
+.metricas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 1px;
+  background: var(--linea);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio);
+  overflow: hidden;
+}
+.metrica { padding: 1.1rem 1.2rem; background: var(--carbon); }
+.metrica b { display: block; margin-bottom: .5rem; }
+.metrica strong {
+  display: block;
+  font-size: 1.65rem;
+  font-weight: 600;
+  letter-spacing: -.03em;
+  line-height: 1.1;
+}
+.metrica strong small { font-size: .7rem; font-weight: 600; color: var(--apagado); margin-left: .2rem; }
+/* La comparacion con la media llega unos segundos despues que el numero, asi
+   que su hueco se reserva desde el principio y la rejilla no da un salto. */
+.metrica .delta { font-size: .76rem; color: var(--apagado); margin-top: .25rem;
+                  display: block; min-height: 1.15em; }
+.delta.bien { color: var(--verde); }
+.delta.mal { color: var(--rojo); }
+
+/* ----------------------------------------------------------------- graficas */
+.grafica { margin-bottom: 1.5rem; }
+.grafica-cabeza {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: .6rem;
+}
+.grafica-cabeza .ahora { font-size: 1.15rem; font-weight: 650; letter-spacing: -.02em; }
+.grafica-cabeza .media { font-size: .76rem; color: var(--apagado); }
+.grafica svg { width: 100%; display: block; overflow: visible; }
+.grafica-pie {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: .5rem;
+  font-size: .72rem;
+  color: var(--apagado);
+}
+.nota-vacia { margin: .5rem 0 0; font-size: .85rem; color: var(--apagado); }
+.chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+/* El selector de periodo vive dentro de la cabecera, donde no debe estirarse
+   para llenar la fila como hacen las pestañas de la barra superior. */
+.encabezado .pestanas { flex: none; }
+.grafica .barra-dia { transition: opacity .15s; }
+.grafica .barra-dia:hover { opacity: .65; }
+.grafica .eje { font-size: 9.5px; fill: var(--apagado); letter-spacing: .08em; }
+.grafica .guia { stroke: var(--linea); stroke-dasharray: 2 4; }
+
+/* ----------------------------------------------------------------- sesiones */
+.lista { display: flex; flex-direction: column; gap: 1px; background: var(--linea);
+         border: 1px solid var(--linea); border-radius: var(--radio); overflow: hidden; }
+.sesion {
+  display: grid;
+  grid-template-columns: 3.4rem 1fr auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.2rem;
+  background: var(--carbon);
+}
+.sesion .dia {
+  text-align: center;
+  line-height: 1.15;
+}
+.sesion .dia .num { display: block; font-size: 1.35rem; font-weight: 650; letter-spacing: -.03em; }
+.sesion .dia .mes { display: block; font-size: .64rem; letter-spacing: .12em;
+                    text-transform: uppercase; color: var(--apagado); }
+.sesion .titulo { font-weight: 600; letter-spacing: -.01em; }
+.sesion .detalle { font-size: .78rem; color: var(--tenue); margin-top: .15rem; }
+.sesion .cifras { display: flex; gap: 1.2rem; text-align: right; }
+.sesion .cifras div b { display: block; font-size: .95rem; font-weight: 650; }
+.sesion .cifras div span { font-size: .64rem; letter-spacing: .1em; text-transform: uppercase;
+                           color: var(--apagado); }
+
+.tipo {
+  display: inline-block;
+  padding: .15rem .5rem;
+  margin-left: .5rem;
+  font-size: .62rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--azul);
+  background: color-mix(in srgb, var(--azul) 14%, transparent);
+  border-radius: 5px;
+  vertical-align: 1px;
+}
+.tipo.fuerza { color: var(--violeta); background: color-mix(in srgb, var(--violeta) 16%, transparent); }
+.tipo.andar  { color: var(--verde); background: color-mix(in srgb, var(--verde) 12%, transparent); }
+
+/* ----------------------------------------------------------------- analisis */
+.insight {
+  position: relative;
+  padding: 1.3rem 1.4rem;
+  margin-bottom: 1rem;
+  background: var(--carbon);
+  border: 1px solid var(--linea);
+  border-left: 3px solid var(--linea-fuerte);
+  border-radius: var(--radio);
+}
+.insight.lectura  { border-left-color: var(--azul); }
+.insight.plan     { border-left-color: var(--verde); }
+.insight.progreso { border-left-color: var(--violeta); }
+.insight.aviso    { border-left-color: var(--amarillo); }
+
+.insight .meta { display: flex; align-items: center; gap: .7rem; margin-bottom: .5rem; }
+.insight .clase { font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.insight.lectura  .clase { color: var(--azul); }
+.insight.plan     .clase { color: var(--verde); }
+.insight.progreso .clase { color: var(--violeta); }
+.insight.aviso    .clase { color: var(--amarillo); }
+.insight .cuando { font-size: .74rem; color: var(--apagado); }
+.insight h3 { margin: 0 0 .5rem; font-size: 1.08rem; letter-spacing: -.02em; }
+.insight p { margin: 0; color: var(--tenue); font-size: .92rem; white-space: pre-wrap; }
+.insight .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .9rem; }
+/* En la portada el analisis se enseña recortado: es un vistazo, y tres textos
+   largos empujarian las metricas del dia fuera de la pantalla. */
+.insight.resumido { padding: 1.1rem 1.2rem; margin-bottom: .7rem; }
+.insight.resumido p {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  /* Sin esto el recorte cuenta como linea el salto entre parrafos y el texto
+     se corta a la mitad de lo que cabe. En el resumen no hacen falta. */
+  white-space: normal;
+}
+.insight.resumido .chips { margin-top: .7rem; }
+#destacados > .fantasma { margin-top: .25rem; }
+.insight .borrar {
+  position: absolute;
+  top: .9rem;
+  right: .9rem;
+  width: auto;
+  margin: 0;
+  padding: .2rem .5rem;
+  font-size: .7rem;
+  color: var(--apagado);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.insight:hover .borrar { opacity: 1; }
+.insight .borrar:hover { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 40%, transparent); filter: none; }
+
+.chip {
+  font-family: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, monospace;
+  font-size: .72rem;
+  padding: .2rem .55rem;
+  color: var(--tenue);
+  background: var(--carbon-alto);
+  border: 1px solid var(--linea);
+  border-radius: 6px;
+}
+.chip b { color: var(--texto); font-weight: 650; }
+
+/* ------------------------------------------------------------------ ajustes */
+.conexion {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 1.2rem 1.4rem;
+  background: var(--carbon);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio);
+  margin-bottom: 1rem;
+}
+.conexion .info { flex: 1; min-width: 12rem; }
+.conexion .info b { display: block; font-size: 1rem; letter-spacing: -.01em; }
+.conexion .info span { font-size: .82rem; color: var(--tenue); }
+.conexion .acciones { display: flex; gap: .5rem; }
+.conexion form { margin: 0; }
+
+.luz { width: .5rem; height: .5rem; border-radius: 50%; flex: none; background: var(--apagado); }
+.luz.on { background: var(--verde); box-shadow: 0 0 0 4px color-mix(in srgb, var(--verde) 18%, transparent); }
+.luz.off { background: var(--rojo); box-shadow: 0 0 0 4px color-mix(in srgb, var(--rojo) 16%, transparent); }
+
+.copiable { display: flex; gap: .5rem; align-items: stretch; margin-top: .6rem; }
+.copiable .url { margin: 0; flex: 1; }
+.copiable button { margin: 0; width: auto; padding: 0 1rem; white-space: nowrap; }
+
+/* ----------------------------------------------------------------- flotante */
+.flotante {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translateX(-50%);
+  z-index: 50;
+  padding: .7rem 1.2rem;
+  font-size: .85rem;
+  color: var(--negro);
+  background: var(--texto);
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+}
+.flotante.malo { background: var(--rojo); color: #fff; }
+
+/* --------------------------------------------------------------- responsive */
+/* En el movil la navegacion se va abajo, que es donde llega el pulgar y donde
+   la espera cualquiera que haya usado una app de deporte. Arriba solo queda la
+   marca y las dos acciones. */
+@media (max-width: 720px) {
+  /* Sin backdrop-filter, y no por rendimiento: un elemento que lo lleva pasa a
+     ser el bloque contenedor de sus hijos `position: fixed`, asi que con el
+     puesto la barra de abajo se anclaba al borde inferior de la cabecera y
+     aparecia arriba del todo, tapando la marca. */
+  .barra {
+    padding: .7rem 1rem;
+    backdrop-filter: none;
+    background: var(--negro);
+  }
+
+  .nav-principal {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    gap: 0;
+    overflow: visible;
+    padding: .4rem .25rem calc(.4rem + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--negro) 94%, transparent);
+    backdrop-filter: blur(16px);
+    border-top: 1px solid var(--linea);
+  }
+  .nav-principal .pestana {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: .55rem .1rem;
+    /* Seis pestañas tienen que caber en 390 px sin cortarse: la mas larga
+       ("Tendencias") manda sobre el tamaño y sobre el espaciado. */
+    font-size: 9px;
+    letter-spacing: .01em;
+    border-radius: 9px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Abajo el pildorazo blanco pesa demasiado: basta con el color y una marca. */
+  .nav-principal .pestana.activa {
+    color: var(--verde);
+    background: transparent;
+    box-shadow: inset 0 2px 0 var(--verde);
+  }
+
+  /* Sitio para la barra: sin esto la ultima tarjeta queda debajo. */
+  #contenido { padding-bottom: calc(5.5rem + env(safe-area-inset-bottom)); }
+  .flotante { bottom: calc(5rem + env(safe-area-inset-bottom)); }
+
+  .anillos { padding: 1.25rem .4rem; gap: .2rem; }
+  .anillo .valor { font-size: 23px; }
+  .anillo .nota { font-size: .7rem; }
+  .metricas { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
+  .metrica { padding: .9rem 1rem; }
+  .metrica strong { font-size: 1.4rem; }
+  .sesion { grid-template-columns: 2.8rem 1fr; padding: .9rem 1rem; }
+  .sesion .cifras { grid-column: 1 / -1; justify-content: flex-start; text-align: left;
+                    gap: 1.6rem; }
+  .insight .borrar { opacity: 1; }
+  .conexion { padding: 1rem; }
+  .conexion .acciones { width: 100%; }
+  .conexion .acciones > * { flex: 1; }
+  .conexion .acciones .fantasma { justify-content: center; width: 100%; }
+  .copiable { flex-direction: column; }
+  .copiable button { width: 100%; padding: .6rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, .anillo .arco { animation: none !important; transition: none !important; }
+}

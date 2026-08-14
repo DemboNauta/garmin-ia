@@ -149,46 +149,72 @@ def registrar_con_invitacion(codigo: str, email: str, password: str) -> str:
     return user_id
 
 
-# ------------------------------------------------------- sesiones de administracion
-_HORAS_SESION = 12
+# ------------------------------------------------------- sesiones del navegador
+# Treinta dias: el panel es la app del usuario y volver a teclear la contraseña
+# cada mañana no protege de nada, porque la cookie es HttpOnly y esta ligada al
+# sitio. Lo que si corta de verdad es cerrar sesion, que la borra de la base.
+_DIAS_SESION = 30
 
 
-def crear_sesion_admin(user_id: str) -> str:
+def crear_sesion(user_id: str) -> str:
+    """Abre sesion de navegador y devuelve el token que va en la cookie."""
     token = secrets.token_urlsafe(32)
     ahora = dt.datetime.now(dt.timezone.utc)
     with store.conn() as c:
         c.execute(
-            "INSERT INTO admin_sessions(token_hash, user_id, created_at, expires_at) "
+            "INSERT INTO sessions(token_hash, user_id, created_at, expires_at) "
             "VALUES(?,?,?,?)",
             (
                 _hash_codigo(token),
                 user_id,
                 ahora.isoformat(),
-                (ahora + dt.timedelta(hours=_HORAS_SESION)).timestamp(),
+                (ahora + dt.timedelta(days=_DIAS_SESION)).timestamp(),
             ),
         )
     return token
 
 
 def usuario_de_sesion(token: str | None) -> str | None:
+    """De la cookie al user_id, o None si no vale.
+
+    Es la unica fuente de identidad del navegador. Antes las paginas de
+    vinculacion cogian el usuario de la URL (`?u=...`), que valia mientras solo
+    se pedian credenciales, pero con un panel de datos de salud detras seria
+    servirle a cualquiera el historial de otro con solo cambiar el parametro.
+    """
     if not token:
         return None
     with store.conn() as c:
         fila = c.execute(
-            "SELECT user_id, expires_at FROM admin_sessions WHERE token_hash=?",
+            "SELECT user_id, expires_at FROM sessions WHERE token_hash=?",
             (_hash_codigo(token),),
         ).fetchone()
     if not fila or fila["expires_at"] < dt.datetime.now(dt.timezone.utc).timestamp():
         return None
-    # Se comprueba en cada peticion: si se le quita el admin a alguien, su
-    # sesion abierta deja de valer al momento.
-    return fila["user_id"] if store.es_admin(fila["user_id"]) else None
+    return fila["user_id"]
+
+
+def admin_de_sesion(token: str | None) -> str | None:
+    """Como usuario_de_sesion, pero solo si ademas es administrador.
+
+    Se comprueba en cada peticion: si se le quita el admin a alguien, su sesion
+    abierta deja de servirle el panel de administracion al momento, sin dejar de
+    servirle el suyo.
+    """
+    user_id = usuario_de_sesion(token)
+    return user_id if user_id and store.es_admin(user_id) else None
 
 
 def cerrar_sesion(token: str | None) -> None:
     if token:
         with store.conn() as c:
-            c.execute("DELETE FROM admin_sessions WHERE token_hash=?", (_hash_codigo(token),))
+            c.execute("DELETE FROM sessions WHERE token_hash=?", (_hash_codigo(token),))
+
+
+def datos_de(user_id: str) -> dict | None:
+    with store.conn() as c:
+        fila = c.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
+    return dict(fila) if fila else None
 
 
 def buscar_por_email(email: str) -> dict | None:

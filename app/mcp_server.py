@@ -11,7 +11,7 @@ import logging
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import activities, profile, scales, store, sync, weight, workouts
+from . import activities, insights, profile, scales, store, sync, weight, workouts
 from .config import settings
 from .garmin_client import para_usuario
 from .identity import usuario_actual
@@ -56,6 +56,11 @@ reemplaza el entrenamiento entero, asi que mandalo completo. El id se conserva,
 de modo que editar no lo saca del calendario; mover la fecha es unschedule_workout
 mas schedule_workout, con el schedule_id de list_scheduled, que no es el id del
 entrenamiento.
+
+Cuando llegues a una conclusion que merezca releerse (por que hoy toca suave,
+el plan de la semana, que la grasa baja y el musculo aguanta), guardala con
+save_insight: aparece en el panel web de la persona y con list_insights
+recuperas el hilo en la siguiente conversacion, que si no empieza en blanco.
 
 Los datos vienen de la nube de Garmin, no del dispositivo, y se cachean: usa
 refresh solo si necesitas el dato del momento.\
@@ -403,6 +408,9 @@ def get_body_composition(days: int = 90) -> dict:
     pesajes sueltos no dice nada.
     """
     usuario = usuario_actual()
+    # La direccion no lleva el usuario: se vincula con la sesion del navegador,
+    # asi que es la misma para todos y quien la abra tendra que iniciar sesion.
+    donde = f"{settings.public_url}/vincular-bascula"
     try:
         return scales.resumen(usuario, days)
     except scales.SinBascula:
@@ -412,7 +420,7 @@ def get_body_composition(days: int = 90) -> dict:
             "note": (
                 "No hay bascula vinculada. Se hace desde la web, no desde aqui, "
                 "porque la contraseña de la bascula no puede pasar por la "
-                f"conversacion: {settings.public_url}/vincular-bascula?u={usuario}. "
+                f"conversacion: {donde}. "
                 "Mientras tanto, el peso de Garmin se lee con get_weight."
             ),
         }
@@ -420,10 +428,7 @@ def get_body_composition(days: int = 90) -> dict:
         return {
             "linked": True,
             "expired": True,
-            "note": (
-                f"{exc} Se vuelve a vincular en "
-                f"{settings.public_url}/vincular-bascula?u={usuario}"
-            ),
+            "note": f"{exc} Se vuelve a vincular en {donde}",
         }
 
 
@@ -457,6 +462,45 @@ def update_profile(perfil: profile.Perfil) -> dict:
     dia suelto.
     """
     return profile.actualizar(usuario_actual(), perfil)
+
+
+@mcp.tool()
+def save_insight(insight: insights.Insight) -> dict:
+    """Deja por escrito una conclusion tuya para que la persona la lea en su panel.
+
+    Todo lo demas de este servidor son datos de Garmin. Esto es lo unico que
+    guarda lo que TU has entendido de ellos, y es lo que aparece en la pestaña
+    de analisis de la web.
+
+    Escribelo cuando llegues a algo que valga la pena releer dentro de un mes:
+    por que hoy toca sesion suave, que se propone para la semana, que la grasa
+    baja mientras el musculo aguanta, o que el sueño lleva cinco dias corto.
+    No lo uses para responder una pregunta suelta ni para repetir un numero que
+    ya esta en get_today: eso ya se ve en el panel sin tu ayuda.
+
+    Escribe para quien lo leera sin la conversacion delante: sin "como te decia",
+    con los numeros dentro de `metrics` y el porque en `body`. Un insight por
+    conclusion, no uno con todo mezclado.
+    """
+    return insights.guardar(usuario_actual(), insight)
+
+
+@mcp.tool()
+def list_insights(limit: int = 20, kind: str | None = None) -> list[dict]:
+    """Tus conclusiones anteriores, de la mas reciente a la mas antigua.
+
+    Miralas al empezar una conversacion sobre entrenamiento: recuperan el hilo
+    de lo que ya se habia decidido y evitan contradecir sin querer un plan de
+    hace tres dias. Filtra con kind: 'lectura', 'plan', 'progreso' o 'aviso'.
+    """
+    return insights.listar(usuario_actual(), limit, kind)
+
+
+@mcp.tool()
+def delete_insight(insight_id: str) -> dict:
+    """Retira una conclusion del panel, p.ej. si resulto estar equivocada."""
+    borrado = insights.borrar(usuario_actual(), insight_id)
+    return {"deleted": borrado} if borrado else {"deleted": False, "note": "No existe ese id."}
 
 
 @mcp.tool()

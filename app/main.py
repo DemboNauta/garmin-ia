@@ -4,9 +4,11 @@ import datetime as dt
 import logging
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.staticfiles import StaticFiles
 from mcp.server.auth.routes import (
     build_resource_metadata_url,
     create_auth_routes,
@@ -17,7 +19,7 @@ from pydantic import AnyHttpUrl
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from . import garmin_client, identity, store, sync, web
+from . import garmin_client, identity, panel, store, sync, web
 from .config import settings
 from .mcp_server import mcp
 from .oauth_provider import proveedor
@@ -163,6 +165,11 @@ for ruta in create_protected_resource_routes(
     app.router.routes.append(ruta)
 
 app.include_router(web.router)
+app.include_router(panel.router)
+# La hoja de estilo y el JS del panel. Van como ficheros y no incrustados en el
+# HTML para que el navegador los cachee entre visitas y para no tener un
+# dashboard entero dentro de una cadena de Python.
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 # El endpoint MCP queda en /mcp — es el que se configura como conector remoto.
 # Va envuelto en BearerAuthMiddleware: expone datos de salud y permite escribir
 # en la cuenta de Garmin, asi que no puede quedar publico.
