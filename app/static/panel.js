@@ -546,55 +546,121 @@ function figura(formas, titulo, valores, etiquetas, tope) {
     const series = valores[region] || 0;
     // Escala con suelo: una region tocada una vez tiene que distinguirse de
     // una sin tocar, aunque el maximo sea alto.
-    const t = tope ? Math.sqrt(series / tope) : 0;
+    const t = tope && series ? Math.sqrt(series / tope) : 0;
     const relleno = series
       ? `color-mix(in srgb, var(--verde) ${Math.round(18 + 72 * t)}%, var(--carbon-alto))`
       : "rgba(255,255,255,.055)";
-    const con = _el(region, forma).replace(
+    return _el(region, forma).replace(
       ">",
-      ` style="fill:${relleno}"><title>${esc(etiquetas[region] || region)}: ` +
+      `${t > 0.6 ? ' data-fuerte=1' : ''} style="fill:${relleno}">` +
+      `<title>${esc(etiquetas[region] || region)}: ` +
       `${NUM(series, series % 1 ? 1 : 0)} series</title>`,
     );
-    return con;
   }).join("");
   return `<div class=cuerpo-figura>
     <svg viewBox="0 0 120 205" role=img aria-label="${esc(titulo)}">${SILUETA}${cuerpo}</svg>
     <div class=rotulo>${esc(titulo)}</div></div>`;
 }
 
+/* La lista minimalista de al lado: nombre, una barra de un pelo y el numero.
+   Es la misma informacion que el cuerpo, en forma legible y ordenada; pasar
+   por encima de una fila enciende su region en las figuras, y al reves. */
+function listaMusculos(valores, etiquetas, tope) {
+  const filas = Object.entries(valores)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([region, v]) => `
+      <div class=musculo-fila data-region="${esc(region)}" tabindex=0>
+        <span class=nombre>${esc(etiquetas[region] || region)}</span>
+        <span class=pista-mini><span class=lleno-mini
+          style="width:${Math.round(100 * v / tope)}%"></span></span>
+        <span class=cifra>${NUM(v, v % 1 ? 1 : 0)}</span>
+      </div>`).join("");
+  return filas || `<p class=nota-vacia>Solo hay series sin identificar en esta selección.</p>`;
+}
+
+// Que dia (o periodo) esta mirando el mapa. Vive fuera de la funcion para que
+// cambiar de pestaña y volver no resetee la seleccion.
+const MAPA = { dias: 30, dia: null };
+
 async function pintarMusculos(seccion) {
   const caja = seccion.querySelector("#mapa-muscular");
   if (!caja) return;
+  let datos;
   try {
-    const datos = await pedirCache(`${API}/musculos?dias=30`);
-    if (datos.garmin_linked === false) { caja.innerHTML = ""; return; }
-    const valores = datos.muscles || {};
-    const etiquetas = datos.regions || {};
-    const tope = Math.max(0, ...Object.values(valores));
-
-    if (!tope && !datos.unknown_sets) {
-      caja.innerHTML = `<p class=nota-vacia>Sin series de fuerza clasificadas en
-        los últimos ${datos.days} días.</p>`;
-      return;
-    }
-
-    const chips = Object.entries(valores)
-      .sort((a, b) => b[1] - a[1])
-      .map(([r, v]) => `<span class=chip><b>${esc(etiquetas[r] || r)}</b> ${NUM(v, v % 1 ? 1 : 0)}</span>`)
-      .join("");
-
-    caja.innerHTML = `
-      <div class=cuerpos>
-        ${figura(CUERPO_FRENTE, "Frente", valores, etiquetas, tope)}
-        ${figura(CUERPO_ESPALDA, "Espalda", valores, etiquetas, tope)}
-      </div>
-      <div class=chips style="margin-top:1rem">${chips}</div>
-      ${datos.unknown_sets ? `<p class=aviso>Además hay <b>${datos.unknown_sets}
-        series sin identificar</b>: el reloj no supo qué ejercicio eran. Cuéntaselo
-        a tu asistente y las repartirá en el mapa.</p>` : ""}`;
+    datos = await pedirCache(`${API}/musculos?dias=${MAPA.dias}`);
   } catch (e) {
     caja.innerHTML = `<p class=nota-vacia>No se pudo cargar el mapa muscular: ${esc(e.message)}</p>`;
+    return;
   }
+  if (datos.garmin_linked === false) { caja.innerHTML = ""; return; }
+
+  const porDia = datos.daily || [];
+  // Si el dia elegido ya no esta en el periodo nuevo, se vuelve al total.
+  if (MAPA.dia && !porDia.some((d) => d.date === MAPA.dia)) MAPA.dia = null;
+  const seleccion = MAPA.dia ? porDia.find((d) => d.date === MAPA.dia) : null;
+  const valores = seleccion ? seleccion.muscles : (datos.muscles || {});
+  const sinId = seleccion ? seleccion.unknown_sets : (datos.unknown_sets || 0);
+  const etiquetas = datos.regions || {};
+  const tope = Math.max(0, ...Object.values(valores));
+
+  const periodos = [7, 30, 90].map((n) =>
+    `<button class="pestana ${n === MAPA.dias && !MAPA.dia ? "activa" : ""}"
+       data-mapa-dias="${n}">${n} días</button>`).join("");
+  const pildorasDia = porDia.map((d) =>
+    `<button class="dia-pildora ${d.date === MAPA.dia ? "activa" : ""}"
+       data-mapa-dia="${d.date}">${esc(fecha(d.date))}
+       <small>${d.sets + d.unknown_sets}</small></button>`).join("");
+
+  const contenido = (!tope && !sinId)
+    ? `<p class=nota-vacia>Sin series de fuerza clasificadas en los últimos
+       ${datos.days} días.</p>`
+    : `<div class=mapa-rejilla>
+        <div class=cuerpos>
+          ${figura(CUERPO_FRENTE, "Frente", valores, etiquetas, tope)}
+          ${figura(CUERPO_ESPALDA, "Espalda", valores, etiquetas, tope)}
+        </div>
+        <div class=musculo-lista>
+          <div class=rotulo>${seleccion
+            ? `Series del ${esc(fecha(seleccion.date))}`
+            : `Series · últimos ${datos.days} días`}</div>
+          ${listaMusculos(valores, etiquetas, tope)}
+        </div>
+      </div>
+      ${sinId ? `<p class=aviso>${seleccion ? "Ese día hay" : "Además hay"}
+        <b>${sinId} series sin identificar</b>: el reloj no supo qué ejercicio
+        eran. Cuéntaselo a tu asistente y las repartirá en el mapa.</p>` : ""}`;
+
+  caja.innerHTML = `
+    <div class=mapa-cabecera>
+      <div class="pestanas periodo-mapa">${periodos}</div>
+      ${pildorasDia ? `<div class=dias-fuerza>${pildorasDia}</div>` : ""}
+    </div>
+    ${contenido}`;
+
+  caja.querySelectorAll("[data-mapa-dias]").forEach((b) =>
+    b.addEventListener("click", () => {
+      MAPA.dias = Number(b.dataset.mapaDias);
+      MAPA.dia = null;
+      pintarMusculos(seccion);
+    }));
+  caja.querySelectorAll("[data-mapa-dia]").forEach((b) =>
+    b.addEventListener("click", () => {
+      // Tocar el dia ya elegido lo deselecciona y vuelve al periodo entero.
+      MAPA.dia = MAPA.dia === b.dataset.mapaDia ? null : b.dataset.mapaDia;
+      pintarMusculos(seccion);
+    }));
+
+  // Fila <-> region: el mismo dato en dos sitios se subraya a la vez.
+  const enlazar = (region, encendido) => {
+    caja.querySelectorAll(`[data-region="${region}"]`).forEach((el) =>
+      el.classList.toggle("destacado", encendido));
+  };
+  caja.querySelectorAll(".musculo-fila, .musculo").forEach((el) => {
+    const region = el.dataset.region;
+    el.addEventListener("mouseenter", () => enlazar(region, true));
+    el.addEventListener("mouseleave", () => enlazar(region, false));
+  });
 }
 
 const COMPOSICION = [

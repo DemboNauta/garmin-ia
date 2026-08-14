@@ -76,22 +76,28 @@ CATEGORIA_A_REGIONES: dict[str, list[tuple[str, float]]] = {
 
 
 def resumen(user_id: str, start: dt.date, end: dt.date) -> dict:
-    """Series por region en el rango, a partir de la cache de actividades.
+    """Series por region en el rango, desglosadas por dia.
 
-    Devuelve tambien las series UNKNOWN y las de categorias sin mapear, para
-    que el panel pueda decir "hay N series sin identificar" en vez de fingir
-    que ese trabajo no existio.
+    El desglose diario existe para que el panel pueda enseñar tanto el periodo
+    entero como un dia suelto sin volver a preguntar: agregar dias en el
+    navegador es gratis, pedirlos de uno en uno no.
+
+    Devuelve tambien las series UNKNOWN, para que el panel pueda decir "hay N
+    series sin identificar" en vez de fingir que ese trabajo no existio.
     """
     sync.asegurar_actividades(user_id, start, end)
-    por_region: dict[str, float] = defaultdict(float)
+    por_dia: dict[str, dict] = {}
     por_categoria: dict[str, int] = defaultdict(int)
-    desconocidas = 0
     sesiones = 0
 
     for actividad in store.get_activities(user_id, start, end):
         bloques = actividad.get("summarizedExerciseSets") or []
         if not bloques:
             continue
+        dia = (actividad.get("startTimeLocal") or "")[:10]
+        acumulado = por_dia.setdefault(
+            dia, {"muscles": defaultdict(float), "unknown_sets": 0, "sets": 0}
+        )
         sesiones += 1
         for bloque in bloques:
             series = bloque.get("sets") or 0
@@ -99,18 +105,36 @@ def resumen(user_id: str, start: dt.date, end: dt.date) -> dict:
                 continue
             categoria = bloque.get("category") or "UNKNOWN"
             if categoria == "UNKNOWN":
-                desconocidas += series
+                acumulado["unknown_sets"] += series
                 continue
+            acumulado["sets"] += series
             por_categoria[categoria] += series
             for region, peso in CATEGORIA_A_REGIONES.get(categoria, []):
-                por_region[region] += series * peso
+                acumulado["muscles"][region] += series * peso
+
+    dias = [
+        {
+            "date": dia,
+            "sets": datos["sets"],
+            "unknown_sets": datos["unknown_sets"],
+            "muscles": {r: round(v, 1) for r, v in datos["muscles"].items()},
+        }
+        for dia, datos in sorted(por_dia.items(), reverse=True)
+        if datos["sets"] or datos["unknown_sets"]
+    ]
+
+    total: dict[str, float] = defaultdict(float)
+    for d in dias:
+        for region, v in d["muscles"].items():
+            total[region] += v
 
     return {
         "from": start.isoformat(),
         "to": end.isoformat(),
         "sessions": sesiones,
-        "unknown_sets": desconocidas,
-        "muscles": {r: round(v, 1) for r, v in por_region.items()},
+        "unknown_sets": sum(d["unknown_sets"] for d in dias),
+        "muscles": {r: round(v, 1) for r, v in total.items()},
+        "daily": dias,
         "regions": {r: info["label"] for r, info in REGIONES.items()},
         "categories": dict(sorted(por_categoria.items(), key=lambda kv: -kv[1])),
     }

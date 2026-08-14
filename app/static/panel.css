@@ -323,21 +323,117 @@
 .chip b { color: var(--texto); font-weight: 650; }
 
 /* ------------------------------------------------------------ mapa muscular */
+.mapa-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .6rem 1rem;
+  margin-bottom: 1.25rem;
+}
+.periodo-mapa { flex: none; }
+
+/* Los dias con fuerza del periodo, para mirar uno suelto. Scroll horizontal
+   sin barra visible: en un mes activo no caben todos y da igual, los recientes
+   son los que se consultan. */
+.dias-fuerza {
+  display: flex;
+  gap: .35rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex: 1;
+  min-width: 0;
+}
+.dias-fuerza::-webkit-scrollbar { display: none; }
+.dia-pildora {
+  flex: none;
+  width: auto;
+  margin: 0;
+  padding: .35rem .65rem;
+  font-size: .74rem;
+  font-weight: 600;
+  color: var(--tenue);
+  background: transparent;
+  border: 1px solid var(--linea);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.dia-pildora small {
+  font-size: .68em;
+  color: var(--apagado);
+  font-variant-numeric: tabular-nums;
+}
+.dia-pildora:hover { color: var(--texto); border-color: var(--linea-fuerte); filter: none; }
+.dia-pildora.activa {
+  color: var(--verde);
+  border-color: color-mix(in srgb, var(--verde) 55%, transparent);
+  background: color-mix(in srgb, var(--verde) 10%, transparent);
+}
+.dia-pildora.activa small { color: inherit; }
+
+.mapa-rejilla {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: clamp(1rem, 4vw, 2.5rem);
+  align-items: center;
+}
 .cuerpos {
   display: flex;
   justify-content: center;
-  gap: clamp(1rem, 6vw, 4rem);
+  gap: clamp(.75rem, 3vw, 2rem);
 }
 .cuerpo-figura { text-align: center; }
-.cuerpo-figura svg { width: clamp(130px, 30vw, 190px); height: auto; display: block; }
+.cuerpo-figura svg { width: clamp(110px, 22vw, 160px); height: auto; display: block; }
 .cuerpo-figura .rotulo { margin-top: .5rem; }
 .cuerpo-figura .silueta { fill: rgba(255, 255, 255, .03); }
 .cuerpo-figura .musculo {
   stroke: rgba(255, 255, 255, .08);
   stroke-width: .6;
   transition: filter .15s;
+  cursor: default;
 }
-.cuerpo-figura .musculo:hover { filter: brightness(1.35); }
+/* El brillo solo para lo mas trabajado: es lo que hace que el mapa se lea a
+   un metro, igual que los anillos. */
+.cuerpo-figura .musculo[data-fuerte] {
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--verde) 50%, transparent));
+}
+.cuerpo-figura .musculo:hover,
+.cuerpo-figura .musculo.destacado {
+  filter: brightness(1.4) drop-shadow(0 0 5px color-mix(in srgb, var(--verde) 45%, transparent));
+}
+
+/* La lista de al lado: nombre, barra de un pelo y numero. */
+.musculo-lista { min-width: 0; }
+.musculo-lista .rotulo { margin-bottom: .7rem; }
+.musculo-fila {
+  display: grid;
+  grid-template-columns: 6.6rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .7rem;
+  padding: .38rem 0;
+  border-radius: 6px;
+  cursor: default;
+  transition: background .15s;
+}
+.musculo-fila .nombre { font-size: .84rem; color: var(--tenue); transition: color .15s; }
+.musculo-fila .cifra { font-size: .84rem; font-weight: 650; min-width: 2.2ch; text-align: right; }
+.pista-mini {
+  display: block;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, .07);
+  overflow: hidden;
+}
+.lleno-mini {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--verde);
+}
+.musculo-fila:hover,
+.musculo-fila.destacado { background: rgba(255, 255, 255, .04); }
+.musculo-fila:hover .nombre,
+.musculo-fila.destacado .nombre { color: var(--texto); }
 
 /* ------------------------------------------------------------------ ajustes */
 .conexion {
@@ -442,6 +538,17 @@
   .sesion .cifras { grid-column: 1 / -1; justify-content: flex-start; text-align: left;
                     gap: 1.6rem; }
   .insight .borrar { opacity: 1; }
+  /* El mapa muscular se apila: figuras arriba, lista debajo. */
+  .mapa-rejilla { grid-template-columns: 1fr; gap: 1.25rem; }
+  .cuerpo-figura svg { width: clamp(120px, 38vw, 150px); }
+  .periodo-mapa .pestana {
+    flex: 0 0 auto;
+    padding: .45rem .7rem;
+    font-size: 10px;
+    letter-spacing: .08em;
+    border-radius: 999px;
+  }
+  .periodo-mapa .pestana.activa { color: var(--negro); background: var(--texto); box-shadow: none; }
   .conexion { padding: 1rem; }
   .conexion .acciones { width: 100%; }
   .conexion .acciones > * { flex: 1; }
