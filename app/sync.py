@@ -48,7 +48,13 @@ def flatten_daily(raw: dict) -> dict:
         "date": raw.get("date"),
         # Carga y actividad
         "steps": s.get("totalSteps"),
+        # Las tres calorias son distintas y hacen falta las tres: activas son
+        # solo el gasto por movimiento, basales lo que quema en reposo, y el
+        # total (basal + activo) es el gasto del dia, que es lo que se compara
+        # con lo que come. Con solo las activas un dia de 1941 kcal parece de 117.
         "active_kcal": s.get("activeKilocalories"),
+        "bmr_kcal": s.get("bmrKilocalories"),
+        "total_kcal": s.get("totalKilocalories"),
         "intensity_minutes": (s.get("moderateIntensityMinutes") or 0)
         + 2 * (s.get("vigorousIntensityMinutes") or 0),
         "floors_climbed": s.get("floorsAscended"),

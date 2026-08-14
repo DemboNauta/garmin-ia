@@ -109,7 +109,9 @@ def get_devices() -> list[dict]:
 @mcp.tool()
 def get_metrics(days: int = 7, refresh: bool = False) -> list[dict]:
     """Metricas diarias de los ultimos N dias: sueño, HRV, FC en reposo,
-    Body Battery, estres, pasos, minutos de intensidad, VO2max y readiness.
+    Body Battery, estres, pasos, minutos de intensidad, VO2max, readiness y
+    calorias (`total_kcal` es el gasto del dia entero, basal mas activo; el
+    `kcal` de get_activities es solo el de esa sesion).
     Con refresh=True fuerza descarga desde Garmin en vez de usar cache."""
     end = sync.today()
     start = end - dt.timedelta(days=days - 1)

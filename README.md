@@ -51,7 +51,7 @@ muscular.
 | Lectura | |
 |---|---|
 | `get_today` | La foto de hoy: sueño, HRV, Body Battery, readiness |
-| `get_metrics(days)` | Serie diaria de las ~15 métricas accionables |
+| `get_metrics(days)` | Serie diaria de las ~15 métricas accionables, calorías del día incluidas |
 | `get_activities(days)` | Sesiones con FC media, ritmo y training effect |
 | `get_activity(id)` | Una sesión al detalle, con sus series |
 | `get_weight(days)` | Pesajes del periodo, con la media y el cambio |
