@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from garminconnect import Garmin
@@ -75,14 +76,23 @@ class GarminClient:
 
     def _call(self, fn_name: str, *args: Any) -> Any:
         """Llama a un metodo de garminconnect reintentando una vez tras re-login."""
+        return self._intentar(lambda api: getattr(api, fn_name)(*args), fn_name)
+
+    def _intentar(self, accion: Callable[[Garmin], Any], etiqueta: str) -> Any:
+        """Ejecuta algo contra la sesion, reintentando una vez con una nueva.
+
+        Lo de siempre: el token caduca y el primer intento se lleva el 401. La
+        version con callable existe para lo que no tiene metodo en la libreria y
+        hay que pedirle al cliente HTTP a pelo.
+        """
         for attempt in (1, 2):
             try:
-                return getattr(self.api(), fn_name)(*args)
+                return accion(self.api())
             except Exception as exc:
                 if attempt == 2:
-                    log.error("Fallo en %s: %s", fn_name, exc)
+                    log.error("Fallo en %s: %s", etiqueta, exc)
                     raise
-                log.warning("Fallo en %s (%s); reintentando con sesion nueva", fn_name, exc)
+                log.warning("Fallo en %s (%s); reintentando con sesion nueva", etiqueta, exc)
                 self.reset()
 
     # --------------------------------------------------------------- lectura
@@ -122,8 +132,17 @@ class GarminClient:
     def activities(self, start: dt.date, end: dt.date) -> list[dict]:
         return self._call("get_activities_by_date", start.isoformat(), end.isoformat()) or []
 
-    def activity_detail(self, activity_id: int | str) -> dict:
-        return self._call("get_activity_details", activity_id)
+    def activity_detail(self, activity_id: int | str, muestras: int = 2000) -> dict:
+        """Serie temporal de una sesion (pulso, ritmo, cadencia... por segundo).
+
+        `maxPolylineSize=0` deja fuera el trazado GPS, que es la mitad larga de
+        la respuesta y aqui no se usa para nada.
+        """
+        return self._call("get_activity_details", str(activity_id), muestras, 0)
+
+    def activity_hr_zones(self, activity_id: int | str) -> list[dict]:
+        """Segundos en cada zona de pulso, tal y como los calcula Garmin."""
+        return self._call("get_activity_hr_in_timezones", str(activity_id)) or []
 
     def activity(self, activity_id: int | str) -> dict:
         """Resumen de una sesion concreta, con su tipo y sus totales."""
@@ -167,6 +186,21 @@ class GarminClient:
 
     def set_activity_description(self, activity_id: int | str, description: str) -> Any:
         return self._call("set_activity_description", str(activity_id), description)
+
+    def set_activity_summary(self, activity_id: int | str, payload: dict) -> Any:
+        """Corrige los totales de una sesion: distancia, duracion, calorias...
+
+        Va al mismo PUT de /activity-service/activity/{id} con el que la
+        libreria cambia el nombre o el deporte mandando solo dos campos, de modo
+        que el cuerpo puede ser parcial. Lo que no tiene garminconnect 0.3.10 es
+        un metodo para el resumen, asi que aqui se llama al cliente HTTP a pelo;
+        el dia que lo añadan, esto se sustituye por un `_call` normal.
+        """
+        ruta = f"/activity-service/activity/{int(activity_id)}"
+        return self._intentar(
+            lambda api: api.client.put("connectapi", ruta, json=payload, api=True),
+            "set_activity_summary",
+        )
 
     def set_activity_type(self, activity_id: int | str, tipo: dict) -> Any:
         """Cambia el deporte de una sesion (el reloj a veces se equivoca)."""

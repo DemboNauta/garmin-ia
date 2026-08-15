@@ -11,7 +11,10 @@ import logging
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import activities, insights, profile, scales, store, strava, sync, weight, workouts
+from . import (
+    activities, insights, profile, scales, store, strava, strength, sync, weight,
+    workouts,
+)
 from .config import settings
 from .garmin_client import para_usuario
 from .identity import usuario_actual
@@ -42,14 +45,20 @@ Para crear fuerza, el orden es: find_exercises para dar con el nombre exacto
 `exercise`. Un ejercicio sin identificar pierde el grupo muscular y la sesion
 deja de ser analizable despues; describirlo en `note` no lo arregla.
 
+Antes de decir con cuanto peso toca, mira get_exercise_history de ese ejercicio:
+dice con cuanto se hizo la ultima vez y como ha ido subiendo. Proponer una carga
+sin haberlo mirado es inventarsela.
+
 Lo que el reloj grabo tambien se corrige. Una pulsera sin pantalla no sabe que
 ejercicio era ni con cuanto peso, asi que las series de fuerza suelen quedar
 como UNKNOWN y sin carga: cuando lo cuente, mira la sesion con get_activity y
-arregla sus series con update_activity_sets, el nombre o el deporte con
-update_activity, y da de alta con add_activity lo que no llegara a grabarse.
-Sin eso, la sesion no cuenta en ningun grupo muscular y no hay progresion de
-peso que seguir. Si tiene Strava vinculado, esa correccion no llega alli sola
-—Garmin solo exporta una vez, al grabar—: despues de update_activity_sets,
+arregla sus series con update_activity_sets, y el nombre, el deporte o los
+totales con update_activity: sin GPS la distancia de un paseo es una estimacion
+por zancada, asi que si dice cuanto anduvo de verdad, corrigela. Lo que no
+llegara a grabarse se da de alta con add_activity. Sin esto, la sesion no cuenta
+en ningun grupo muscular y no hay progresion de peso ni de distancia que seguir.
+Si tiene Strava vinculado, esa correccion no llega alli sola —Garmin solo
+exporta una vez, al grabar—: despues de update_activity_sets,
 sync_activity_to_strava oculta en Strava la version mal detectada y sube la
 corregida.
 
@@ -66,7 +75,8 @@ save_insight: aparece en el panel web de la persona y con list_insights
 recuperas el hilo en la siguiente conversacion, que si no empieza en blanco.
 
 Los datos vienen de la nube de Garmin, no del dispositivo, y se cachean: usa
-refresh solo si necesitas el dato del momento.\
+refresh, o sync_now si quieres rehacer varios dias, solo cuando necesites el
+dato del momento (tipico si acaba de sincronizar el reloj con el movil).\
 """
 
 def _seguridad_transporte() -> TransportSecuritySettings | None:
@@ -122,9 +132,15 @@ def get_devices() -> list[dict]:
 @mcp.tool()
 def get_metrics(days: int = 7, refresh: bool = False) -> list[dict]:
     """Metricas diarias de los ultimos N dias: sueño, HRV, FC en reposo,
-    Body Battery, estres, pasos, minutos de intensidad, VO2max, readiness y
-    calorias (`total_kcal` es el gasto del dia entero, basal mas activo; el
-    `kcal` de get_activities es solo el de esa sesion).
+    Body Battery, estres, pasos, minutos de intensidad, VO2max, readiness,
+    estado de entrenamiento y calorias (`total_kcal` es el gasto del dia entero,
+    basal mas activo; el `kcal` de get_activities es solo el de esa sesion).
+
+    En `training_status` van la etiqueta de Garmin (`status`) y, mas util a
+    diario, la carga aguda de 7 dias frente a la cronica de 4 semanas: eso es lo
+    que dice si esta subiendo el volumen demasiado rapido. Las pulseras sin
+    pantalla mandan la carga pero dejan el estado en 'no_status'.
+
     Con refresh=True fuerza descarga desde Garmin en vez de usar cache."""
     end = sync.today()
     start = end - dt.timedelta(days=days - 1)
@@ -180,6 +196,79 @@ def get_activities(days: int = 30) -> list[dict]:
     ]
 
 
+@mcp.tool()
+def sync_now(days: int = 7) -> dict:
+    """Fuerza la descarga de los ultimos N dias desde Garmin, pasando de la cache.
+
+    El uso normal no la necesita: las lecturas ya bajan solas lo que les falta.
+    Esto es para cuando acaba de sincronizar el reloj con el movil y quiere ver
+    lo de hace un minuto, o cuando algo se quedo a medias y hay que rehacerlo.
+
+    Rebaja el dia entero (sueño, HRV, pasos, estado) y las actividades del
+    rango. Cuesta una llamada a Garmin por dia, asi que no pidas treinta si te
+    valen siete. Los dias que fallen vienen en `errors` sin tumbar el resto.
+    """
+    dias = max(1, min(int(days), 30))
+    return sync.sync_range(usuario_actual(), dias)
+
+
+@mcp.tool()
+def get_exercise_history(exercise: str | None = None, days: int = 180) -> dict:
+    """Historial de cargas de un ejercicio: con cuanto peso, cuantas series y
+    cuanto volumen, sesion a sesion.
+
+    Es lo que hay que mirar antes de decir con que peso toca hoy. Sin `exercise`
+    devuelve la lista de lo que ha entrenado en el periodo, con su ultima fecha
+    y su mejor peso, que sirve para saber por cual preguntar.
+
+    `exercise` acepta el nombre del catalogo ('Barbell Bench Press'), el enum de
+    Garmin o la categoria a secas ('BENCH_PRESS'). Se agrupa por categoria, no
+    por variante: la variante la adivina el reloj por el movimiento y cambia de
+    un dia para otro con las mismas mancuernas, asi que separarlas partiria la
+    progresion en trozos de una sesion. Cada fila dice la variante que detecto.
+
+    El periodo es largo por defecto porque un ejercicio se repite una o dos
+    veces por semana: con 30 dias salen tres puntos y eso no es una progresion.
+
+    Ojo con las sesiones sin identificar: lo que quedo como UNKNOWN no aparece
+    aqui hasta que se arregle con update_activity_sets.
+    """
+    end = sync.today()
+    start = end - dt.timedelta(days=max(1, days) - 1)
+    usuario = usuario_actual()
+    if not exercise:
+        return strength.catalogo_entrenado(usuario, start, end)
+    return strength.historial(usuario, exercise, start, end)
+
+
+@mcp.tool()
+def get_activity_hr(activity_id: int, points: int = 40) -> dict:
+    """Curva de pulso de una sesion: como subio y bajo, y cuanto tiempo paso en
+    cada zona.
+
+    Sirve para saber de que fue la sesion de verdad, que el resumen no lo dice:
+    una media de 130 puede ser una hora plana o diez series de subir a 165 y
+    bajar. En `points` va la curva ya resumida en tramos, cada uno con su media
+    (`bpm`) y su pico (`peak`), y el minuto en que empieza.
+
+    `zones` es el reparto por zonas que calcula Garmin con el perfil de la
+    persona, en minutos y en porcentaje.
+
+    Baja la serie completa de Garmin, asi que no la pidas para todas las
+    sesiones de un tiron: primero get_activities y luego esta para la que
+    interese.
+    """
+    cli = _cliente()
+    try:
+        zonas = cli.activity_hr_zones(activity_id)
+    except Exception as exc:  # noqa: BLE001
+        # Sin zonas la curva sigue valiendo: no todas las sesiones las traen.
+        log.info("Sin zonas de FC para la actividad %s (%s)", activity_id, exc)
+        zonas = []
+    curva = activities.curva_fc(cli.activity_detail(activity_id), zonas, points)
+    return {"activity_id": activity_id, **curva}
+
+
 def _dia_de(actividad: dict) -> str:
     """Fecha local de una sesion, que es como se indexa la cache."""
     return ((actividad.get("summaryDTO") or {}).get("startTimeLocal") or "")[:10]
@@ -224,6 +313,7 @@ def get_activity(activity_id: int) -> dict:
         "avg_hr": s.get("averageHR"),
         "max_hr": s.get("maxHR"),
         "kcal": s.get("calories"),
+        "elevation_gain_m": round(s["elevationGain"]) if s.get("elevationGain") else None,
     }
     try:
         series = activities.leer_series(_cliente().activity_sets(activity_id))
@@ -241,13 +331,25 @@ def update_activity(
     name: str | None = None,
     activity_type: str | None = None,
     description: str | None = None,
+    distance_km: float | None = None,
+    duration_min: float | None = None,
+    calories: float | None = None,
+    elevation_gain_m: float | None = None,
+    start: str | None = None,
 ) -> dict:
     """Corrige los datos generales de una sesion ya registrada: como se llama,
-    que deporte fue y una nota.
+    que deporte fue, una nota y sus totales (distancia, duracion, calorias,
+    desnivel y hora de inicio).
 
     Solo toca lo que mandes. Sirve para cuando el reloj clasifico mal la sesion
-    (una cinta como 'walking', unas dominadas como 'cardio_training') o la dejo
-    con el nombre generico que pone el.
+    (una cinta como 'walking', unas dominadas como 'cardio_training'), la dejo
+    con el nombre generico que pone el, o midio mal lo que hizo: sin GPS la
+    distancia de un paseo sale de la zancada estimada y se queda corta o larga,
+    y en interior directamente no hay distancia que valga.
+
+    Al cambiar la distancia o la duracion se rehace tambien el ritmo medio, que
+    es lo que hace que la correccion sirva de algo. `start` es la hora local de
+    inicio ('2026-08-13T21:30:00') y mueve la sesion en el calendario.
 
     `activity_type` es la clave de Garmin en ingles: running, walking,
     strength_training, cycling, indoor_cycling, hiking, cardio_training, yoga,
@@ -257,6 +359,14 @@ def update_activity(
     """
     cli = _cliente()
     cambios: dict = {"activity_id": activity_id}
+    totales = {
+        "distancia_km": distance_km,
+        "duracion_min": duration_min,
+        "calorias": calories,
+        "desnivel_m": elevation_gain_m,
+        "inicio_local": activities.normalizar_inicio(start) if start else None,
+    }
+
     if name is not None:
         cli.set_activity_name(activity_id, name)
         cambios["name"] = name
@@ -267,9 +377,34 @@ def update_activity(
     if description is not None:
         cli.set_activity_description(activity_id, description)
         cambios["description"] = description
+
+    dia_previo = None
+    if any(v is not None for v in totales.values()):
+        # La sesion tal y como esta ahora: de ella salen la distancia o la
+        # duracion que no se corrigen, necesarias para recalcular el ritmo, y el
+        # dia que ocupaba antes por si `start` la muda a otro.
+        antes = cli.activity(activity_id)
+        dia_previo = _dia_de(antes)
+        cli.set_activity_summary(
+            activity_id,
+            activities.payload_resumen(
+                activity_id, antes.get("summaryDTO") or {}, settings.timezone, **totales
+            ),
+        )
+        cambios.update({
+            k: v for k, v in {
+                "distance_km": distance_km,
+                "duration_min": duration_min,
+                "calories": calories,
+                "elevation_gain_m": elevation_gain_m,
+                "start": totales["inicio_local"],
+            }.items() if v is not None
+        })
+
     if len(cambios) == 1:
         return {**cambios, "updated": False, "note": "No se indico nada que cambiar."}
-    _refrescar_cache(_dia_de(cli.activity(activity_id)))
+    for dia in {_dia_de(cli.activity(activity_id)), dia_previo} - {None, ""}:
+        _refrescar_cache(dia)
     return {**cambios, "updated": True}
 
 

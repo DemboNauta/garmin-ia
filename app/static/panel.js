@@ -195,6 +195,26 @@ function linea(puntos, color, opciones = {}) {
   <span>${esc(fecha(puntos[ultimo].fecha))}</span></div>`;
 }
 
+/* El estado de entrenamiento solo lo calculan los relojes que lo traen: una
+   pulsera manda la carga aguda y cronica pero deja el estado en NO_STATUS, y
+   escribir "no status" en el anillo no informa de nada. */
+function etiquetaEstado(estado) {
+  const s = estado.status;
+  return s && s !== "no_status" ? s.replaceAll("_", " ") : "";
+}
+
+function bloqueEstado(estado) {
+  const nombre = etiquetaEstado(estado);
+  const carga = estado.load_acute != null
+    ? `Carga de entrenamiento: <b>${NUM(estado.load_acute)}</b> aguda (7 días)
+       frente a <b>${NUM(estado.load_chronic)}</b> crónica (4 semanas)`
+      + `${estado.acwr_status ? `, ${esc(estado.acwr_status.toLowerCase())}` : ""}.`
+    : "";
+  if (!nombre && !carga) return "";
+  return `<p class=aviso>${nombre
+    ? `Estado de entrenamiento según Garmin: <b>${esc(nombre)}</b>. ` : ""}${carga}</p>`;
+}
+
 /* --------------------------------------------------------------- metricas */
 /* La comparacion con la media llega despues que el numero: pedirla obliga a
    bajar treinta dias de Garmin y eso son segundos, mientras que el valor de hoy
@@ -285,7 +305,7 @@ async function pintarHoy(seccion) {
       ${anillo({
         valor: d.training_readiness, nombre: "Recuperación",
         color: colorRecuperacion(d.training_readiness),
-        nota: estado.trainingStatus ? String(estado.trainingStatus).toLowerCase() : "readiness de Garmin",
+        nota: etiquetaEstado(estado) || "readiness de Garmin",
       })}
       ${anillo({
         valor: d.sleep_score ?? (d.sleep_hours != null ? Math.round(d.sleep_hours / 8 * 100) : null),
@@ -329,10 +349,7 @@ async function pintarHoy(seccion) {
       ${metrica({ nombre: "FC máxima", valor: d.max_hr, unidad: "ppm" })}
       ${metrica({ nombre: "VO₂ máx.", valor: d.vo2max, decimales: 1 })}
     </div>
-    ${estado.trainingStatus ? `<p class=aviso>Estado de entrenamiento según Garmin:
-      <b>${esc(String(estado.trainingStatus).toLowerCase())}</b>.
-      ${estado.trainingStatusFeedbackPhrase
-        ? esc(String(estado.trainingStatusFeedbackPhrase).replaceAll("_", " ").toLowerCase()) : ""}</p>` : ""}
+    ${bloqueEstado(estado)}
   `;
   animarAnillos(seccion);
 

@@ -87,12 +87,6 @@ def flatten_daily(raw: dict) -> dict:
     def hours(seconds: Any) -> float | None:
         return round(seconds / 3600, 2) if isinstance(seconds, (int, float)) else None
 
-    vo2 = _dig(raw, "max_metrics", default=None)
-    if isinstance(vo2, list) and vo2:
-        vo2 = _dig(vo2[0], "generic", "vo2MaxPreciseValue") or _dig(vo2[0], "generic", "vo2MaxValue")
-    else:
-        vo2 = None
-
     return {
         "date": raw.get("date"),
         # Carga y actividad
@@ -112,7 +106,7 @@ def flatten_daily(raw: dict) -> dict:
         "avg_hr": s.get("averageHeartRate"),
         "hrv_last_night": _dig(raw, "hrv", "hrvSummary", "lastNightAvg"),
         "hrv_status": _dig(raw, "hrv", "hrvSummary", "status"),
-        "vo2max": vo2,
+        "vo2max": _vo2max(raw),
         # Recuperacion
         "sleep_hours": hours(sleep_dto.get("sleepTimeSeconds")),
         "sleep_score": _dig(sleep_dto, "sleepScores", "overall", "value"),
@@ -123,8 +117,77 @@ def flatten_daily(raw: dict) -> dict:
         "body_battery_low": s.get("bodyBatteryLowestValue"),
         "avg_stress": s.get("averageStressLevel"),
         "training_readiness": _first(_dig(raw, "training_readiness"), "score"),
-        "training_status": _dig(raw, "training_status", "latestTrainingStatusData"),
+        "training_status": _estado_entrenamiento(raw),
     }
+
+
+def _vo2max(raw: dict) -> float | None:
+    """VO2max del dia, o el ultimo que Garmin tenga estimado.
+
+    `max_metrics` solo trae algo el dia en que se recalcula (una salida larga
+    con FC estable), asi que en la mayoria de los dias llega como lista vacia.
+    El valor vigente sigue estando en el bloque de estado de entrenamiento, que
+    es de donde lo saca la propia app para enseñarlo todos los dias.
+    """
+    metricas = _dig(raw, "max_metrics", default=None)
+    generico = metricas[0] if isinstance(metricas, list) and metricas else None
+    if not isinstance(generico, dict):
+        generico = _dig(raw, "training_status", "mostRecentVO2Max", default={})
+    return _dig(generico, "generic", "vo2MaxPreciseValue") or _dig(
+        generico, "generic", "vo2MaxValue"
+    )
+
+
+def _dispositivo_principal(por_dispositivo: dict) -> dict:
+    """De los relojes que reportaron estado, el que manda.
+
+    Garmin devuelve el estado indexado por id de dispositivo, porque quien tiene
+    reloj y ciclocomputador tiene dos. Se coge el marcado como principal y, si
+    ninguno lo esta, el que trae la fecha mas reciente.
+    """
+    entradas = [v for v in por_dispositivo.values() if isinstance(v, dict)]
+    if not entradas:
+        return {}
+    principales = [e for e in entradas if e.get("primaryTrainingDevice")]
+    return max(principales or entradas, key=lambda e: e.get("calendarDate") or "")
+
+
+def _estado_entrenamiento(raw: dict) -> dict | None:
+    """Estado de entrenamiento y carga aguda/cronica del dia.
+
+    Estaba colgando de la clave equivocada (`latestTrainingStatusData` no cuelga
+    de la raiz del bloque sino de `mostRecentTrainingStatus`), asi que llegaba
+    siempre a null aunque Garmin lo estuviera mandando.
+
+    La etiqueta sale de la frase de feedback ('PRODUCTIVE_2' -> 'productive') y
+    no del numero: `trainingStatus` es un enum interno sin documentar, y de la
+    frase se lee lo mismo sin tener que adivinar la tabla. Se devuelve tambien
+    el codigo crudo por si algun dia hace falta.
+    """
+    por_dispositivo = _dig(
+        raw, "training_status", "mostRecentTrainingStatus", "latestTrainingStatusData",
+        default={},
+    )
+    datos = _dispositivo_principal(por_dispositivo or {})
+    if not datos:
+        return None
+    frase = datos.get("trainingStatusFeedbackPhrase") or ""
+    etiqueta = frase.rsplit("_", 1)[0].lower() if frase else None
+    carga = datos.get("acuteTrainingLoadDTO") or {}
+    estado = {
+        "status": etiqueta,
+        "feedback": frase or None,
+        "code": datos.get("trainingStatus"),
+        "since": datos.get("sinceDate"),
+        "paused": datos.get("trainingPaused"),
+        # Aguda es la carga de los ultimos 7 dias y cronica la de las 4 semanas:
+        # su cociente (acwr) es lo que dice si se esta subiendo demasiado rapido.
+        "load_acute": carga.get("dailyTrainingLoadAcute"),
+        "load_chronic": carga.get("dailyTrainingLoadChronic"),
+        "acwr_pct": carga.get("acwrPercent"),
+        "acwr_status": carga.get("acwrStatus"),
+    }
+    return {k: v for k, v in estado.items() if v is not None}
 
 
 def _intensidad(s: dict) -> int | None:

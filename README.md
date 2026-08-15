@@ -58,14 +58,17 @@ A partir de ahí tienes las dos mitades: el asistente, en tu conversación, y tu
 | `get_metrics(days)` | Serie diaria de las ~15 métricas accionables, calorías del día incluidas |
 | `get_activities(days)` | Sesiones con FC media, ritmo y training effect |
 | `get_activity(id)` | Una sesión al detalle, con sus series |
+| `get_activity_hr(id)` | La curva de pulso de una sesión y sus minutos por zona |
+| `get_exercise_history(ejercicio, days)` | Con cuánto peso, cuántas series y cuánto volumen, sesión a sesión |
 | `get_weight(days)` | Pesajes del periodo, con la media y el cambio |
 | `get_body_composition(days)` | Peso, grasa, músculo y agua de tu báscula, con la tendencia semanal |
 | `get_devices` | Qué Garmin hay vinculados y su última sincronización |
+| `sync_now(days)` | Fuerza la descarga desde Garmin en vez de usar la caché |
 
 | Corregir lo ya hecho | |
 |---|---|
 | `update_activity_sets(id, sets)` | Reescribe las series: ejercicio, repeticiones y peso |
-| `update_activity(id, ...)` | Arregla el nombre, el deporte o la nota |
+| `update_activity(id, ...)` | Arregla el nombre, el deporte, la nota y los totales (distancia, duración, calorías, desnivel, hora) |
 | `add_activity(...)` | Da de alta a mano lo que el reloj no llegó a grabar |
 | `log_weight(kg)` | Apunta un pesaje sin abrir la app |
 | `sync_activity_to_strava(id)` | Lleva a Strava una corrección que ya hiciste en Garmin |
