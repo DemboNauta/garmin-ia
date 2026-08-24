@@ -417,6 +417,19 @@ def leer_push_strava(user_id: str, garmin_activity_id: str) -> dict | None:
     return dict(fila) if fila else None
 
 
+def strava_ids_subidos(user_id: str) -> set[str]:
+    """Los `strava_activity_id` que ya creamos nosotros para este usuario.
+
+    Sirve para que, al buscar la actividad original mal detectada, no se acabe
+    encontrando (y ocultando) la corregida que subimos en una pasada anterior.
+    """
+    with conn() as c:
+        filas = c.execute(
+            "SELECT strava_activity_id FROM strava_pushes WHERE user_id=?", (user_id,)
+        ).fetchall()
+    return {r["strava_activity_id"] for r in filas}
+
+
 # ------------------------------------------------------------------ metricas
 def save_daily(user_id: str, day: dt.date, payload: dict) -> None:
     with conn() as c:
