@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import html
 import logging
+import time
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from . import accounts, garmin_client, scales, store
+from . import accounts, garmin_client, scales, store, strava
 from .config import settings
 from .oauth_provider import proveedor
 
@@ -557,4 +558,97 @@ def desvincular_bascula(request: Request):
     if user_id:
         scales.desvincular(user_id)
         log.info("Bascula desvinculada para %s", user_id)
+    return RedirectResponse("/panel", status_code=303)
+
+
+# ------------------------------------------------------------- vinculacion de Strava
+# El estado del OAuth solo vive en memoria y unos minutos, igual que el MFA de
+# Garmin: es un numero de un solo uso para que /strava/callback sepa que la
+# vuelta viene de una ida que empezo aqui y de que usuario, no un dato que
+# merezca sobrevivir a un reinicio.
+_STRAVA_STATE: dict[str, tuple[str, float]] = {}
+_STRAVA_STATE_TTL = 600  # segundos
+
+
+@router.get("/vincular-strava", response_class=HTMLResponse)
+def form_strava(request: Request, error: str = ""):
+    user_id = _usuario(request)
+    if not user_id:
+        return _a_entrar("/vincular-strava")
+    if not strava.habilitado():
+        return _pagina(
+            "Strava no disponible",
+            "<h1>Strava no está configurado</h1><p class=sub>Quien administra "
+            "este servidor todavía no ha dado de alta una app de Strava.</p>"
+            "<a class=boton href='/panel'>Volver a mi panel</a>",
+        )
+
+    ya = strava.estado(user_id)
+    aviso_actual = (
+        f"<div class=ok>Ahora mismo está vinculada la cuenta de "
+        f"{html.escape(ya['athlete'] or 'Strava')}. Si vuelves a conectar, la sustituye.</div>"
+        if ya else ""
+    )
+
+    import secrets as _s
+    codigo_estado = _s.token_urlsafe(24)
+    _STRAVA_STATE[codigo_estado] = (user_id, time.time() + _STRAVA_STATE_TTL)
+
+    return _pagina(
+        "Conectar Strava",
+        f"<h1>Lleva a Strava las series que ya corregiste</h1>"
+        f"<p class=sub>Si tu reloj detecta mal una sesión de fuerza (una serie "
+        f"donde hiciste veinticinco), Garmin la exporta a Strava tal cual antes "
+        f"de que la corrijas. Con esto, tu asistente puede ocultar ahí la "
+        f"versión mal detectada y subir la que ya arreglaste en Garmin.</p>"
+        f"{aviso_actual}"
+        f"{_aviso(error) if error else ''}"
+        f"<a class=boton href='{html.escape(strava.url_autorizacion(codigo_estado))}'>"
+        f"Conectar con Strava</a>"
+        f"<p class=aviso>Se abre en strava.com: tu contraseña de Strava no pasa "
+        f"por aquí en ningún momento, solo el permiso que autorices allí.</p>",
+    )
+
+
+@router.get("/strava/callback", response_class=HTMLResponse)
+def strava_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    user_id = _usuario(request)
+    if not user_id:
+        return _a_entrar("/vincular-strava")
+
+    pendiente = _STRAVA_STATE.pop(state, None) if state else None
+    if error:
+        return form_strava(request, error="Strava no concedió el permiso." if error == "access_denied"
+                            else f"Strava devolvió un error: {error}"[:150])
+    # El estado tiene que ser uno que se emitio para ESTE usuario: sin la
+    # comprobacion, alguien podria colgarle a otro su propia cuenta de Strava
+    # simplemente adivinando o reutilizando un enlace de autorizacion ajeno.
+    if not pendiente or pendiente[0] != user_id or pendiente[1] < time.time():
+        return form_strava(request, error="El enlace de autorización ha caducado. Empieza de nuevo.")
+    if not code:
+        return form_strava(request, error="Strava no devolvió ningún código de autorización.")
+
+    try:
+        vinculo = strava.vincular(user_id, code)
+    except strava.ErrorDeStrava as exc:
+        log.info("Fallo vinculando Strava de %s: %s", user_id, exc)
+        return form_strava(request, error=f"No se pudo vincular: {exc}"[:200])
+
+    log.info("Strava vinculado para %s (atleta %s)", user_id, vinculo.get("athlete_id"))
+    return _pagina(
+        "Listo",
+        f"<h1>Strava conectado</h1>"
+        f"<div class=ok>{html.escape(vinculo['athlete'] or 'Cuenta')} vinculada.</div>"
+        f"<p class=sub>Tu asistente ya puede corregir en Strava las sesiones de "
+        f"fuerza que arregles en Garmin.</p>"
+        f"<a class=boton href='/panel'>Ir a mi panel</a>",
+    )
+
+
+@router.post("/desvincular-strava")
+def desvincular_strava(request: Request):
+    user_id = _usuario(request)
+    if user_id:
+        strava.desvincular(user_id)
+        log.info("Strava desvinculado para %s", user_id)
     return RedirectResponse("/panel", status_code=303)
