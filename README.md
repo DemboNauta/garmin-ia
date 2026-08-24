@@ -68,6 +68,7 @@ A partir de ahí tienes las dos mitades: el asistente, en tu conversación, y tu
 | `update_activity(id, ...)` | Arregla el nombre, el deporte o la nota |
 | `add_activity(...)` | Da de alta a mano lo que el reloj no llegó a grabar |
 | `log_weight(kg)` | Apunta un pesaje sin abrir la app |
+| `sync_activity_to_strava(id)` | Lleva a Strava una corrección que ya hiciste en Garmin |
 
 | Entrenamientos | |
 |---|---|
@@ -152,6 +153,40 @@ guarda; el permiso queda cifrado. Añadir otra marca es escribir su módulo
 
 > «¿Estoy perdiendo grasa o músculo este mes?»
 
+## Strava
+
+Garmin exporta cada sesión a Strava **una sola vez, al grabarla**. Si el reloj
+solo detectó una serie donde hubo veinticinco, eso es lo que llega a Strava —
+y corregirlo después en Garmin con `update_activity_sets` no lo actualiza
+allí, porque esa sincronización no vuelve a viajar.
+
+`sync_activity_to_strava` cierra ese hueco: busca en Strava la sesión mal
+detectada por su hora de inicio, la **oculta** (Strava no deja borrar
+actividades por API desde 2017, solo sacarlas del perfil y el feed) y sube
+una nueva con las series ya corregidas.
+
+> «Ayer el reloj solo contó una serie de press banca. Arréglalo y llévalo a
+> Strava también.»
+
+Se vincula en `/vincular-strava`, con OAuth: como con Garmin y la báscula, la
+contraseña de Strava no pasa por aquí en ningún momento, solo el permiso que
+autorices en strava.com.
+
+A diferencia de Garmin o la báscula, aquí sí hay **API oficial** para lo que
+hace falta —no hubo que reverse-engineerear nada—, pero con dos límites que
+la propia Strava impone y que condicionan el diseño:
+
+- **No se puede borrar por API.** Por eso se oculta la sesión mal detectada
+  en vez de borrarla; sigue existiendo, huérfana, en la cuenta del usuario.
+- **No se pueden editar las series de una actividad ya subida**, tampoco con
+  el soporte de fuerza que Strava añadió en 2026. Solo se puede subir de
+  nuevo.
+
+Requiere que quien administre el servidor dé de alta una app en
+[strava.com/settings/api](https://www.strava.com/settings/api) y rellene
+`GB_STRAVA_CLIENT_ID`/`GB_STRAVA_CLIENT_SECRET` (ver `.env.example`); sin
+ellas, el botón de Strava directamente no aparece en el panel.
+
 ## Arquitectura
 
 ```mermaid
@@ -168,6 +203,7 @@ flowchart LR
     B -->|MCP + OAuth 2.1| C[Claude · ChatGPT]
     B -->|panel web| N[Navegador]
     B -->|REST + bearer| R[Lo que quieras]
+    B <-->|API oficial + OAuth2| S[(Strava)]
 ```
 
 Los datos salen de **Garmin Connect**, no del dispositivo: funciona con
@@ -243,4 +279,9 @@ protege de nada.
   el bloqueo.
 - **Los entrenamientos se ven en la app**, no siempre en la muñeca: depende de
   si tu dispositivo tiene pantalla.
+- **El `exercise_type` de Strava no está del todo verificado.** Strava no
+  publica la lista de valores que acepta su formato de fuerza; se reenvía el
+  nombre que ya usa el catálogo de Garmin (`BARBELL_BENCH_PRESS`...), que
+  coincide con los ejemplos documentados en su comunidad de desarrolladores,
+  pero puede que Strava no reconozca todos y los meta en un genérico "Otro".
 
