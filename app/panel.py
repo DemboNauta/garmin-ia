@@ -20,7 +20,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from . import accounts, garmin_client, insights, muscles, profile, scales, store, sync, weight
+from . import accounts, garmin_client, insights, muscles, profile, scales, store, strava, sync, weight
 from .config import settings
 from .web import COOKIE, pagina_panel
 
@@ -69,10 +69,19 @@ def api_estado(usuario: str = Depends(usuario_web)) -> dict:
             {"linked": True, **bascula} if bascula
             else {"linked": False, "providers": scales.catalogo()}
         ),
+        "strava": _estado_strava(usuario),
         "mcp_url": f"{settings.public_url}/mcp",
         "profile": profile.leer(usuario),
         "timezone": settings.timezone,
     }
+
+
+def _estado_strava(usuario: str) -> dict:
+    if not strava.habilitado():
+        return {"available": False}
+    vinculo = strava.estado(usuario)
+    return {"available": True, "linked": True, **vinculo} if vinculo else \
+        {"available": True, "linked": False}
 
 
 # ------------------------------------------------------------------- api: hoy

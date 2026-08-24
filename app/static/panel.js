@@ -831,6 +831,25 @@ const CAMPOS_PERFIL = [
   ["goals", "Objetivos"], ["limitations", "Limitaciones"], ["notes", "Notas"],
 ];
 
+function pintarConexionStrava(s) {
+  // Si quien administra el servidor no ha dado de alta una app de Strava, la
+  // fila ni aparece: mejor eso que un botón que solo lleva a un error.
+  if (!s || !s.available) return "";
+  return `
+    <div class=conexion>
+      <span class="luz ${s.linked ? "on" : ""}"></span>
+      <div class=info><b>Strava</b>
+        <span>${s.linked
+          ? `${esc(s.athlete || "Cuenta conectada")} · desde ${esc(fecha(s.linked_at))}`
+          : "Sin vincular. Lleva a Strava las sesiones de fuerza que corrijas en Garmin."}</span></div>
+      <div class=acciones>
+        <a class=fantasma href="/vincular-strava">${s.linked ? "Cambiar" : "Vincular"}</a>
+        ${s.linked ? `<form method=post action="/desvincular-strava">
+          <button class=fantasma type=submit>Desvincular</button></form>` : ""}
+      </div>
+    </div>`;
+}
+
 function pintarAjustes(seccion) {
   const e = APP.estado;
   const garmin = e.garmin.linked;
@@ -871,6 +890,8 @@ function pintarAjustes(seccion) {
           <button class=fantasma type=submit>Desvincular</button></form>` : ""}
       </div>
     </div>
+
+    ${pintarConexionStrava(e.strava)}
 
     <div class=titulo-seccion>Conector para tu asistente</div>
     <div class=tarjeta-panel>
