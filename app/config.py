@@ -46,5 +46,12 @@ class Settings(BaseSettings):
     sync_interval_minutes: int = 60
     sync_backfill_days: int = 7
 
+    # OAuth de Strava (developers.strava.com/settings). Vacias, la vinculacion
+    # se desactiva sola: el boton no aparece en vez de fallar a medias.
+    # El "Authorization Callback Domain" que pide Strava al crear la app es el
+    # host de GB_PUBLIC_URL, sin esquema ni ruta.
+    strava_client_id: str = ""
+    strava_client_secret: str = ""
+
 
 settings = Settings()

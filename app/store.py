@@ -92,6 +92,28 @@ CREATE TABLE IF NOT EXISTS scale_links (
     linked_at   TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
+-- Cuenta de Strava vinculada, una por usuario. Los tokens OAuth van cifrados
+-- igual que los de Garmin y la bascula; nunca la contraseña, que ni pasa por
+-- aqui: la vinculacion es un redirect a strava.com, no un formulario propio.
+CREATE TABLE IF NOT EXISTS strava_links (
+    user_id     TEXT PRIMARY KEY,
+    athlete_id  TEXT NOT NULL,
+    athlete     TEXT,
+    tokens_enc  TEXT NOT NULL,
+    linked_at   TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+-- Que actividad de Garmin ya se llevo a Strava, y con que par de ids (la
+-- corregida que subimos nosotros, la original mal detectada que se oculto).
+-- Sin esto, pedir la sincronizacion dos veces subiria la sesion duplicada.
+CREATE TABLE IF NOT EXISTS strava_pushes (
+    user_id             TEXT NOT NULL,
+    garmin_activity_id  TEXT NOT NULL,
+    strava_activity_id  TEXT NOT NULL,
+    hidden_activity_id  TEXT,
+    pushed_at           TEXT NOT NULL,
+    PRIMARY KEY (user_id, garmin_activity_id)
+);
 -- Preferencias de entrenamiento: material, reparto, lesiones. Lo que Garmin no
 -- sabe y el modelo necesita para no proponer a ciegas.
 CREATE TABLE IF NOT EXISTS user_profiles (
@@ -286,6 +308,7 @@ def borrar_usuario(user_id: str) -> None:
     """Elimina al usuario y todo lo suyo. Sin esto no hay derecho de supresion."""
     with conn() as c:
         for tabla in ("daily", "activities", "garmin_sessions", "scale_links",
+                      "strava_links", "strava_pushes",
                       "user_profiles", "insights", "sessions", "oauth_tokens", "users"):
             c.execute(f"DELETE FROM {tabla} WHERE user_id=?", (user_id,))
 
@@ -337,6 +360,61 @@ def leer_bascula(user_id: str) -> dict | None:
 def borrar_bascula(user_id: str) -> None:
     with conn() as c:
         c.execute("DELETE FROM scale_links WHERE user_id=?", (user_id,))
+
+
+# --------------------------------------------------------------- Strava
+def guardar_strava(user_id: str, athlete_id: str, athlete: str | None, tokens_enc: str) -> None:
+    """Una cuenta de Strava por usuario: volver a vincular sustituye a la anterior."""
+    with conn() as c:
+        c.execute(
+            "INSERT INTO strava_links(user_id, athlete_id, athlete, tokens_enc, linked_at) "
+            "VALUES(?,?,?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET athlete_id=excluded.athlete_id, "
+            "athlete=excluded.athlete, tokens_enc=excluded.tokens_enc, "
+            "linked_at=excluded.linked_at",
+            (user_id, athlete_id, athlete, tokens_enc, _now()),
+        )
+
+
+def leer_strava(user_id: str) -> dict | None:
+    with conn() as c:
+        fila = c.execute("SELECT * FROM strava_links WHERE user_id=?", (user_id,)).fetchone()
+    return dict(fila) if fila else None
+
+
+def actualizar_tokens_strava(user_id: str, tokens_enc: str) -> None:
+    """Solo el par de tokens, tras refrescarlos. No toca `linked_at`: eso sigue
+    siendo cuando el usuario autorizo por primera vez, no la ultima renovacion."""
+    with conn() as c:
+        c.execute("UPDATE strava_links SET tokens_enc=? WHERE user_id=?", (tokens_enc, user_id))
+
+
+def borrar_strava(user_id: str) -> None:
+    with conn() as c:
+        c.execute("DELETE FROM strava_links WHERE user_id=?", (user_id,))
+
+
+def registrar_push_strava(
+    user_id: str, garmin_activity_id: str, strava_activity_id: str, hidden_activity_id: str | None
+) -> None:
+    with conn() as c:
+        c.execute(
+            "INSERT INTO strava_pushes(user_id, garmin_activity_id, strava_activity_id, "
+            "hidden_activity_id, pushed_at) VALUES(?,?,?,?,?) "
+            "ON CONFLICT(user_id, garmin_activity_id) DO UPDATE SET "
+            "strava_activity_id=excluded.strava_activity_id, "
+            "hidden_activity_id=excluded.hidden_activity_id, pushed_at=excluded.pushed_at",
+            (user_id, str(garmin_activity_id), strava_activity_id, hidden_activity_id, _now()),
+        )
+
+
+def leer_push_strava(user_id: str, garmin_activity_id: str) -> dict | None:
+    with conn() as c:
+        fila = c.execute(
+            "SELECT * FROM strava_pushes WHERE user_id=? AND garmin_activity_id=?",
+            (user_id, str(garmin_activity_id)),
+        ).fetchone()
+    return dict(fila) if fila else None
 
 
 # ------------------------------------------------------------------ metricas
