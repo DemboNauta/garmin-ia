@@ -251,7 +251,13 @@ def ocultar_actividad(user_id: str, strava_activity_id: str) -> None:
 _FORMATO_GARMIN = "%Y-%m-%dT%H:%M:%S.%f"  # como llega startTime en exerciseSets, en GMT
 
 
-def _desde_garmin(texto: str | None) -> dt.datetime | None:
+def desde_garmin(texto: str | None) -> dt.datetime | None:
+    """`startTime`/`startTimeGMT` de Garmin (GMT, con milesimas) -> datetime aware.
+
+    Publica porque el llamador (el tool de sincronizacion) tambien la necesita
+    para saber cuando empezo la sesion en Garmin y poder buscar su pareja en
+    Strava: es el mismo formato en ambos sitios, mejor una sola conversion.
+    """
     if not texto:
         return None
     try:
@@ -280,7 +286,7 @@ def _series_strava(exercise_sets: list[dict]) -> list[dict]:
         tipo = mejor.get("name") or mejor.get("category")
         if not tipo or tipo == "UNKNOWN":
             continue
-        inicio = _desde_garmin(s.get("startTime"))
+        inicio = desde_garmin(s.get("startTime"))
         peso = s.get("weight")
         entrada = {
             "exercise_type": tipo,

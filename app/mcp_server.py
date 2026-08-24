@@ -11,7 +11,7 @@ import logging
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import activities, insights, profile, scales, store, sync, weight, workouts
+from . import activities, insights, profile, scales, store, strava, sync, weight, workouts
 from .config import settings
 from .garmin_client import para_usuario
 from .identity import usuario_actual
@@ -48,7 +48,10 @@ como UNKNOWN y sin carga: cuando lo cuente, mira la sesion con get_activity y
 arregla sus series con update_activity_sets, el nombre o el deporte con
 update_activity, y da de alta con add_activity lo que no llegara a grabarse.
 Sin eso, la sesion no cuenta en ningun grupo muscular y no hay progresion de
-peso que seguir.
+peso que seguir. Si tiene Strava vinculado, esa correccion no llega alli sola
+—Garmin solo exporta una vez, al grabar—: despues de update_activity_sets,
+sync_activity_to_strava oculta en Strava la version mal detectada y sube la
+corregida.
 
 Para editar, get_workout devuelve los pasos con la misma forma que espera
 create_workout: cambia lo que haga falta y pasalos a update_workout. Eso
@@ -324,6 +327,106 @@ def update_activity_sets(activity_id: int, sets: list[activities.Serie]) -> dict
     if avisos:
         resultado["warnings"] = avisos
     _refrescar_cache(_dia_de(cli.activity(activity_id)))
+    return resultado
+
+
+@mcp.tool()
+def sync_activity_to_strava(activity_id: int, force: bool = False) -> dict:
+    """Lleva a Strava las series ya corregidas de una sesion de fuerza.
+
+    Garmin exporta cada sesion a Strava UNA vez, al grabarla: si el reloj solo
+    vio una serie donde hubo veinticinco, eso es lo que hay en Strava, y
+    corregirlo despues con update_activity_sets no lo actualiza alli, porque
+    esa sincronizacion no vuelve a viajar. Usa esta herramienta justo despues
+    de corregir las series en Garmin, no en vez de hacerlo.
+
+    Hace dos cosas: busca en Strava la sesion mal detectada por su hora de
+    inicio y la OCULTA (Strava no permite borrar por API, solo dejarla fuera
+    del perfil y el feed), y sube una nueva con las series corregidas. Si no
+    encuentra ninguna sesion cercana en Strava, sube la corregida igualmente
+    y lo dice en la respuesta: puede que esa sesion nunca se exportara o que
+    ya estuviera oculta.
+
+    Repetir la llamada sobre la misma sesion no la vuelve a subir salvo que
+    pases force=True (por si la vuelves a corregir mas tarde y quieres que
+    tambien se refleje).
+    """
+    usuario = usuario_actual()
+    donde = f"{settings.public_url}/vincular-strava"
+    if not strava.habilitado():
+        return {"linked": False, "note": "Este servidor no tiene Strava configurado."}
+    if strava.estado(usuario) is None:
+        return {
+            "linked": False,
+            "note": (
+                "No hay cuenta de Strava vinculada. Se hace desde la web, no "
+                f"desde aqui, porque el permiso de Strava no puede pasar por "
+                f"la conversacion: {donde}"
+            ),
+        }
+
+    previo = store.leer_push_strava(usuario, activity_id)
+    if previo and not force:
+        return {
+            "activity_id": activity_id,
+            "already_synced": True,
+            "strava_activity_id": previo["strava_activity_id"],
+            "strava_url": f"https://www.strava.com/activities/{previo['strava_activity_id']}",
+            "note": "Ya se habia sincronizado. Pasa force=True para repetirlo tras otra correccion.",
+        }
+
+    cli = _cliente()
+    a = cli.activity(activity_id)
+    s = a.get("summaryDTO") or {}
+    crudo = cli.activity_sets(activity_id) or {}
+    exercise_sets = crudo.get("exerciseSets") or []
+    if not exercise_sets:
+        return {
+            "activity_id": activity_id,
+            "note": "Esta sesion no tiene series de fuerza que subir.",
+        }
+
+    inicio = strava.desde_garmin(s.get("startTimeGMT"))
+    if inicio is None:
+        return {
+            "activity_id": activity_id,
+            "note": "No se pudo determinar la hora de inicio de la sesion en Garmin.",
+        }
+
+    resultado: dict = {"activity_id": activity_id}
+    try:
+        original = strava.buscar_actividad(usuario, inicio)
+        if original:
+            strava.ocultar_actividad(usuario, str(original["id"]))
+            resultado["hidden_activity_id"] = str(original["id"])
+        else:
+            resultado["note"] = (
+                "No se encontro en Strava ninguna sesion cerca de esa hora para "
+                "ocultar; se sube la corregida de todos modos."
+            )
+
+        subida = strava.subir_fuerza(
+            usuario,
+            nombre=a.get("activityName") or "Entrenamiento de fuerza",
+            inicio=inicio,
+            duracion_seg=s.get("duration") or 0,
+            exercise_sets=exercise_sets,
+            external_id=f"garmin:{activity_id}",
+            descripcion=a.get("description"),
+        )
+    except strava.SesionCaducada as exc:
+        return {"linked": True, "expired": True, "note": f"{exc} Se vuelve a vincular en {donde}"}
+    except strava.ErrorDeStrava as exc:
+        return {"activity_id": activity_id, "error": str(exc)}
+
+    store.registrar_push_strava(
+        usuario, activity_id, subida["strava_activity_id"], resultado.get("hidden_activity_id")
+    )
+    resultado.update({
+        "strava_activity_id": subida["strava_activity_id"],
+        "strava_url": f"https://www.strava.com/activities/{subida['strava_activity_id']}",
+        "synced": True,
+    })
     return resultado
 
 
