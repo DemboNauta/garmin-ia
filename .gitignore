@@ -16,3 +16,6 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+
+# tokens de Garmin en claro, temporales al rehacer el login
+tokens_nuevos.json
