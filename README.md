@@ -14,6 +14,12 @@ tu HRV y tu recuperación, y escribe entrenamientos estructurados en tu cuenta.
 ![MCP](https://img.shields.io/badge/MCP-1.29-6E56CF)
 ![OAuth 2.1](https://img.shields.io/badge/OAuth-2.1%20+%20PKCE-2ea44f)
 
+<br>
+
+![El panel, pestaña Hoy](docs/capturas/panel-hoy.png)
+
+<sub>Las capturas llevan datos de ejemplo, no los de nadie.</sub>
+
 </div>
 
 ---
@@ -135,6 +141,25 @@ vez de empezar de cero cada vez.
 Sin dependencias ni compilación: HTML, una hoja de estilo y un fichero de
 JavaScript servidos por el propio FastAPI. En el móvil la navegación se va a una
 barra inferior, donde llega el pulgar.
+
+### Tendencias
+
+Nueve series con su media al lado. Un día sin dato deja su hueco en vez de
+inventarse una barra.
+
+![Pestaña Tendencias](docs/capturas/panel-tendencias.png)
+
+### Sesiones
+
+![Pestaña Sesiones](docs/capturas/panel-sesiones.png)
+
+### Cuerpo
+
+Composición corporal de la báscula y mapa de músculos entrenados: el color sale
+de las series que el reloj registró, repartidas por grupo muscular. Las que no
+supo identificar se cuentan aparte en vez de desaparecer.
+
+![Pestaña Cuerpo](docs/capturas/panel-cuerpo.png)
 
 ## Báscula inteligente
 

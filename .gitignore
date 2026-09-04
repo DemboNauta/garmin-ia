@@ -19,3 +19,6 @@ venv/
 
 # tokens de Garmin en claro, temporales al rehacer el login
 tokens_nuevos.json
+
+# perfiles temporales de Chrome al generar las capturas
+docs/perfil-*/
