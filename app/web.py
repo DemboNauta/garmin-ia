@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 import time
 
 from fastapi import APIRouter, Form, Request
@@ -403,8 +404,10 @@ def form_garmin(request: Request, error: str = "", mfa: str = ""):
         f"<label for=password>Contraseña de Garmin</label>"
         f"<input id=password name=password type=password required autocomplete=off>"
         f"<button type=submit>Vincular</button></form>"
-        f"<p class=aviso>Garmin limita los intentos por IP. Si falla, espera un "
-        f"rato antes de reintentar en vez de insistir.</p>",
+        f"<p class=aviso>Garmin bloquea este formulario desde servidores: si "
+        f"responde 403, no es tu contraseña. "
+        f"<a href='/vincular-garmin/navegador'>Identifícate en Garmin</a> y "
+        f"vuelve, que esa vía sale desde tu conexión y no desde la nuestra.</p>",
     )
 
 
@@ -479,6 +482,124 @@ def _guardar_vinculo(user_id: str, api) -> HTMLResponse:
         "<a href='/vincular-bascula'>Vincúlala también</a> y el asistente verá tu "
         "grasa y tu masa muscular, no solo el peso.</p>",
     )
+
+
+# --------------------------------------- vinculacion desde el navegador (ticket)
+# Cloudflare bloquea el login con contraseña desde IPs de datacenter: el
+# formulario de arriba responde 403 aunque la contraseña sea correcta. Esta via
+# se salta el problema entero moviendo el login al navegador del usuario, que
+# tiene IP domestica: nosotros solo recibimos el ticket que Garmin emite al
+# final y lo canjeamos, que es una llamada que el servidor si puede hacer.
+#
+# Efecto lateral bueno: la contraseña de Garmin deja de pasar por aqui.
+
+# Codigo -> (user_id, service_url exacto, caducidad). El service_url se guarda
+# porque el canje EXIGE el mismo que se uso al pedir el ticket, hasta la ultima
+# letra de la query.
+_TICKET_STATE: dict[str, tuple[str, str, float]] = {}
+_TICKET_STATE_TTL = 15 * 60
+
+
+def _url_sso(service: str, cliente: str) -> str:
+    from urllib.parse import urlencode
+
+    return "https://sso.garmin.com/sso/signin?" + urlencode(
+        {"service": service, "clientId": cliente}
+    )
+
+
+def _ticket_de(pegado: str) -> str:
+    """Saca el ST-... de lo que sea que haya pegado el usuario."""
+    m = re.search(r"(ST-[A-Za-z0-9._-]+)", pegado.strip())
+    return m.group(1) if m else ""
+
+
+@router.get("/vincular-garmin/navegador", response_class=HTMLResponse)
+def form_navegador(request: Request, error: str = ""):
+    user_id = _usuario(request)
+    if not user_id:
+        return _a_entrar("/vincular-garmin/navegador")
+
+    import secrets as _s
+
+    estado = _s.token_urlsafe(24)
+    servicio = f"{settings.public_url}/garmin/callback?state={estado}"
+    _TICKET_STATE[estado] = (user_id, servicio, time.time() + _TICKET_STATE_TTL)
+
+    return _pagina(
+        "Conectar Garmin desde tu navegador",
+        f"<h1>Identifícate en Garmin</h1>"
+        f"<p class=sub>Se abre la página de Garmin. Tu contraseña se queda allí: "
+        f"aquí solo llega el permiso que Garmin emite al terminar.</p>"
+        f"{_aviso(error) if error else ''}"
+        f"<a class=boton href='{html.escape(_url_sso(servicio, 'GarminConnect'))}'>"
+        f"Ir a Garmin</a>"
+        f"<p class=aviso>El enlace vale 15 minutos.</p>"
+        f"<hr>"
+        f"<h2>Si Garmin no te devuelve aquí</h2>"
+        f"<p class=sub>Algunas cuentas terminan en una página de Garmin en vez de "
+        f"volver. Si te pasa, entra por "
+        f"<a href='{html.escape(_url_sso(garmin_client.SERVICIO_SSO_MOVIL, garmin_client.CLIENTE_SSO_MOVIL))}' "
+        f"target=_blank rel=noopener>este otro enlace</a>, y cuando acabes copia "
+        f"la dirección completa de la barra del navegador (la que lleva "
+        f"<code>ticket=ST-...</code>) y pégala aquí abajo. Caduca en segundos, "
+        f"así que pégala nada más verla.</p>"
+        f"<form method=post action='/vincular-garmin/ticket'>"
+        f"<label for=pegado>Dirección con el ticket</label>"
+        f"<input id=pegado name=pegado required autocomplete=off "
+        f"placeholder='https://mobile.integration.garmin.com/gcm/android?ticket=ST-...'>"
+        f"<button type=submit>Vincular con ese ticket</button></form>",
+    )
+
+
+@router.get("/garmin/callback", response_class=HTMLResponse)
+def garmin_callback(request: Request, ticket: str = "", state: str = ""):
+    user_id = _usuario(request)
+    if not user_id:
+        return _a_entrar("/vincular-garmin/navegador")
+
+    pendiente = _TICKET_STATE.pop(state, None) if state else None
+    # Mismo motivo que en Strava: sin comprobar de quien es el estado, bastaria
+    # con colarle a alguien un enlace para colgarle una cuenta de Garmin ajena.
+    if not pendiente or pendiente[0] != user_id or pendiente[2] < time.time():
+        return form_navegador(request, error="El enlace ha caducado. Empieza de nuevo.")
+    if not ticket:
+        return form_navegador(request, error="Garmin no devolvió ningún ticket.")
+
+    return _vincular_con_ticket(request, user_id, ticket, pendiente[1])
+
+
+@router.post("/vincular-garmin/ticket", response_class=HTMLResponse)
+def vincular_ticket(request: Request, pegado: str = Form(...)):
+    user_id = _usuario(request)
+    if not user_id:
+        return _a_entrar("/vincular-garmin/navegador")
+
+    ticket = _ticket_de(pegado)
+    if not ticket:
+        return form_navegador(
+            request, error="Ahí no hay ningún ticket: busca el ST-... en la dirección."
+        )
+    # Por esta via el login se hizo contra el servicio movil, asi que el canje
+    # tiene que declarar ese mismo.
+    return _vincular_con_ticket(
+        request, user_id, ticket, garmin_client.SERVICIO_SSO_MOVIL
+    )
+
+
+def _vincular_con_ticket(
+    request: Request, user_id: str, ticket: str, service_url: str
+) -> HTMLResponse:
+    try:
+        api = garmin_client.sesion_desde_ticket(ticket, service_url)
+    except Exception as exc:
+        log.info("Fallo canjeando el ticket de %s: %s", user_id, exc)
+        return form_navegador(
+            request,
+            error=f"Garmin no aceptó el ticket: {str(exc)[:150]}. "
+            "Suelen durar segundos, así que casi siempre es que llegó tarde.",
+        )
+    return _guardar_vinculo(user_id, api)
 
 
 # ------------------------------------------------------------ vinculacion de bascula

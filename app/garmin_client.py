@@ -38,6 +38,32 @@ class GarminAuthError(RuntimeError):
     pass
 
 
+# Servicio SSO de la app de Android, el que la libreria usa por defecto. Sirve
+# como destino de reserva cuando Garmin no acepta uno propio.
+SERVICIO_SSO_MOVIL = "https://mobile.integration.garmin.com/gcm/android"
+CLIENTE_SSO_MOVIL = "GCM_ANDROID_DARK"
+
+
+def sesion_desde_ticket(ticket: str, service_url: str) -> Garmin:
+    """Monta una sesion a partir de un service ticket de CAS.
+
+    Es la vinculacion sin contraseña: el navegador del usuario se identifica en
+    la pagina de Garmin, desde su IP y con su navegador de verdad, y aqui solo
+    llega el ticket resultante. Lo montamos con el, que es una llamada a
+    `diauth.garmin.com` y esa el servidor si la puede hacer: Cloudflare bloquea
+    el login desde IPs de datacenter, no el canje.
+
+    Se usan dos metodos privados de garminconnect porque la libreria no expone
+    esta entrada; si un dia cambian de nombre, esto es lo que hay que tocar.
+    """
+    api = Garmin()
+    api.client._establish_session(ticket, service_url=service_url)
+    # El canje puede devolver un token que la API luego rechace. Pedir el perfil
+    # es la unica forma de saberlo aqui y no tres dias despues en un sync.
+    api._load_profile_and_settings()
+    return api
+
+
 class GarminClient:
     """Cliente perezoso y thread-safe, atado a un usuario concreto.
 
