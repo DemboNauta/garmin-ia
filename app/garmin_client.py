@@ -6,6 +6,7 @@ para que el resto del backend no se entere si un dia hay que cambiarla.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import threading
 from collections.abc import Callable
@@ -18,6 +19,19 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 _lock = threading.Lock()
+
+
+def _leer_json(texto: str) -> dict | None:
+    """El volcado de tokens como dict, para poder compararlo.
+
+    Se compara el contenido y no la cadena porque el orden de las claves no esta
+    garantizado y no queremos una escritura en cada llamada.
+    """
+    try:
+        datos = json.loads(texto)
+    except (TypeError, ValueError):
+        return None
+    return datos if isinstance(datos, dict) else None
 
 
 class GarminAuthError(RuntimeError):
@@ -37,6 +51,9 @@ class GarminClient:
         self.user_id = user_id
         self._api: Garmin | None = None
         self._tipos: list[dict] | None = None
+        # Ultimo juego de tokens que sabemos escrito en la base. Sirve para no
+        # reescribir en cada llamada, solo cuando Garmin los ha rotado.
+        self._tokens_en_base: dict | None = None
 
     # ------------------------------------------------------------------ auth
     def api(self) -> Garmin:
@@ -49,10 +66,11 @@ class GarminClient:
                     f"El usuario '{self.user_id}' no tiene Garmin vinculado todavia."
                 )
             api = Garmin()
+            claro = crypto.descifrar(cifrado)
             try:
                 # La libreria acepta el tokenstore como JSON en linea, no solo
                 # como ruta: eso permite tenerlos cifrados en la base.
-                api.login(crypto.descifrar(cifrado))
+                api.login(claro)
                 log.info("Sesion de Garmin reanudada para %s", self.user_id)
             except crypto.ErrorDeCifrado:
                 raise
@@ -62,16 +80,54 @@ class GarminClient:
                     "(token caducado o revocado). Hay que volver a vincular."
                 ) from exc
             self._api = api
+            self._tokens_en_base = _leer_json(claro)
+            # El propio login ya puede haber refrescado, y ahi empieza la
+            # rotacion: si no se guarda ahora, lo de la base nace caducado.
+            self._persistir_si_rotaron()
             return api
 
     def guardar_sesion(self, api: Garmin) -> None:
         """Persiste cifrada la sesion de una vinculacion recien hecha."""
-        store.guardar_tokens_garmin(self.user_id, crypto.cifrar(api.client.dumps()))
+        volcado = api.client.dumps()
+        store.guardar_tokens_garmin(self.user_id, crypto.cifrar(volcado))
         with _lock:
             self._api = api
+            self._tokens_en_base = _leer_json(volcado)
+
+    def _persistir_si_rotaron(self) -> None:
+        """Reescribe los tokens en la base si Garmin los ha rotado.
+
+        Es la diferencia entre una sesion que sobrevive a un reinicio y una que
+        no. Garmin devuelve un `di_refresh_token` NUEVO en cada refresco e
+        invalida el anterior (`_refresh_di_token` en garminconnect), y el
+        refresco lo hace la libreria sola, en memoria. Mientras el proceso vive
+        no se nota nada; al reiniciar, la base tiene el que se quemo en el
+        primer refresco y Garmin contesta 400 al canjearlo, que llega aqui como
+        un 401 y parece un token caducado o una vinculacion revocada.
+
+        No aborta la llamada en curso si falla: perder una escritura solo cuesta
+        una revinculacion, y tumbar la peticion del usuario cuesta mas.
+        """
+        api = self._api
+        if api is None:
+            return
+        try:
+            volcado = api.client.dumps()
+            actual = _leer_json(volcado)
+            if not actual or actual == self._tokens_en_base:
+                return
+            store.guardar_tokens_garmin(self.user_id, crypto.cifrar(volcado))
+            self._tokens_en_base = actual
+            log.info("Tokens de Garmin rotados y reguardados para %s", self.user_id)
+        except Exception:
+            log.exception("No se pudieron reguardar los tokens de %s", self.user_id)
 
     def reset(self) -> None:
         with _lock:
+            # Antes de tirar la sesion, salvar lo que traiga: un refresco puede
+            # haber colado y la llamada fallar despues, y ese token rotado es el
+            # unico que sirve ya.
+            self._persistir_si_rotaron()
             self._api = None
 
     def _call(self, fn_name: str, *args: Any) -> Any:
@@ -87,7 +143,11 @@ class GarminClient:
         """
         for attempt in (1, 2):
             try:
-                return accion(self.api())
+                resultado = accion(self.api())
+                # Cualquier llamada puede haber disparado un refresco por el
+                # camino, asi que se comprueba aqui y no en un sitio concreto.
+                self._persistir_si_rotaron()
+                return resultado
             except Exception as exc:
                 if attempt == 2:
                     log.error("Fallo en %s: %s", etiqueta, exc)
