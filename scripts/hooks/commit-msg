@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Guardia del mensaje de commit. Se activa con:
+#
+#   git config core.hooksPath scripts/hooks
+#
+# Va aqui y no en .git/hooks porque ese directorio no se versiona: asi la regla
+# viaja con el repo y vale igual para quien clone.
+#
+# Rechaza la coautoria de Claude y el pie de "Generated with Claude Code". Los
+# commits de este repo no los llevan: el asunto y el cuerpo explican el porque
+# del cambio, y quien lo tecleo no aporta nada a eso.
+set -u
+
+mensaje="$1"
+
+# Solo las lineas reales: los comentarios que git añade debajo no cuentan, o
+# rechazariamos el commit por lo que el propio git escribe.
+contenido=$(grep -v '^#' "$mensaje")
+
+fallo=0
+
+if printf '%s' "$contenido" | grep -qiE '^co-authored-by:[[:space:]]*claude'; then
+    echo "commit-msg: quita el trailer 'Co-Authored-By: Claude'." >&2
+    fallo=1
+fi
+
+if printf '%s' "$contenido" | grep -qiE 'generated with \[?claude code'; then
+    echo "commit-msg: quita el pie de 'Generated with Claude Code'." >&2
+    fallo=1
+fi
+
+if printf '%s' "$contenido" | grep -qiE '^claude-session:'; then
+    echo "commit-msg: quita el trailer 'Claude-Session'." >&2
+    fallo=1
+fi
+
+asunto=$(printf '%s' "$contenido" | sed '/^[[:space:]]*$/d' | head -1)
+
+if [ -z "$asunto" ]; then
+    echo "commit-msg: el mensaje esta vacio." >&2
+    fallo=1
+fi
+
+# Aviso, no rechazo: un asunto largo es feo, pero no es motivo para tumbar un
+# commit ya escrito.
+largo=${#asunto}
+if [ "$largo" -gt 72 ]; then
+    echo "commit-msg: aviso, el asunto mide $largo caracteres (mas de 72)." >&2
+fi
+
+# La segunda linea tiene que estar en blanco: sin eso, git trata todo el
+# mensaje como asunto y `git log --oneline` queda ilegible.
+if [ "$(sed -n 2p "$mensaje")" != "" ] && [ "$(grep -vc '^#' "$mensaje")" -gt 1 ]; then
+    echo "commit-msg: aviso, deja una linea en blanco entre el asunto y el cuerpo." >&2
+fi
+
+exit $fallo

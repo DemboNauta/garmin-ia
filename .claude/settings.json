@@ -1,0 +1,20 @@
+{
+  "attribution": {
+    "commit": ""
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "statusMessage": "Comprobando el mensaje del commit...",
+            "command": "c=$(cat); case \"$c\" in *\"git commit\"*) : ;; *) exit 0 ;; esac; if printf '%s' \"$c\" | grep -qiE 'co-authored-by: *claude|generated with .?claude code|claude-session:'; then printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Los commits de este repo no llevan coautoria de Claude, pie de Claude Code ni trailer Claude-Session. Reescribe el mensaje sin eso: asunto corto y cuerpo explicando el porque.\"}}'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

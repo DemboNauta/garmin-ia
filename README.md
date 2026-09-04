@@ -266,6 +266,17 @@ python -m app.admin invitar tu@email.com
 volver a vincular Garmin y su báscula. Guárdala separada de la base de datos, o el cifrado no
 protege de nada.
 
+Si vas a hacer commits, activa el guardián de mensajes. No se activa solo porque
+`core.hooksPath` es configuración local de cada clon:
+
+```bash
+git config core.hooksPath scripts/hooks
+```
+
+Rechaza los pies de coautoría automática y avisa si el asunto pasa de 72
+caracteres. Los commits de aquí llevan asunto corto y cuerpo explicando el
+porqué del cambio.
+
 ## Avisos
 
 - **La librería es no oficial.** [`garminconnect`](https://github.com/cyberjunky/python-garminconnect)
