@@ -38,10 +38,12 @@ class GarminAuthError(RuntimeError):
     pass
 
 
-# Servicio SSO de la app de Android, el que la libreria usa por defecto. Sirve
-# como destino de reserva cuando Garmin no acepta uno propio.
-SERVICIO_SSO_MOVIL = "https://mobile.integration.garmin.com/gcm/android"
-CLIENTE_SSO_MOVIL = "GCM_ANDROID_DARK"
+# Servicio contra el que se pide el ticket. Garmin IGNORA el que le mandes en la
+# URL y emite el ticket siempre para este, asi que el canje tiene que declarar
+# este mismo o responde que el ticket no es suyo. Comprobado a mano: pidiendo el
+# widget con un `service` propio, la respuesta trae
+# `serviceUrl: 'https://sso.garmin.com/sso/embed'`.
+SERVICIO_SSO_EMBED = "https://sso.garmin.com/sso/embed"
 
 
 def sesion_desde_ticket(ticket: str, service_url: str) -> Garmin:
